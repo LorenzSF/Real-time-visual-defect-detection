@@ -1,0 +1,34 @@
+run:
+  seed: 42
+  output_dir: "data/runs"
+  run_name: "baseline"
+
+dataset:
+  source_type: "zip"          # "zip" or "folder"
+  path: "data/raw/sample.zip" # set to your local ZIP path or pass --dataset-path
+  extract_dir: "data/raw/extracted"
+  image_glob: "**/*.png"      # also supports jpg/jpeg if you change code
+
+preprocessing:
+  resize:
+    enabled: true
+    width: 256
+    height: 256
+  normalize:
+    enabled: true
+    mode: "0_1"               # "0_1" or "imagenet" (we implement 0_1 now)
+
+corruption:
+  enabled: false
+  type: "gaussian_noise"      # "gaussian_noise" | "gaussian_blur" | "resolution_reduction"
+  params:
+    sigma: 10.0               # for noise
+    ksize: 5                  # for blur (odd)
+    scale: 0.5                # for resolution reduction
+
+model:
+  name: "dummy_distance"      # start with dummy; later implement AE/patch/embedding
+  threshold: 0.5              # used for binary decision (normal/anomalous)
+
+evaluation:
+  metrics: ["precision", "recall", "f1", "accuracy"]
