@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
 
 
-DEFAULT_SETTINGS_FILE = Path("src") / "inspection_realtime" / "settings.yaml"
+DEFAULT_SETTINGS_FILE = Path("src") / "streaming_input" / "settings.yaml"
 
 
 def load_settings(path: str | Path) -> Dict[str, Any]:
@@ -67,8 +68,8 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     resolved = dict(cfg)
 
     run_cfg = dict(resolved.get("run", {}))
-    run_cfg.setdefault("output_dir", "data/inspection realtime")
-    run_cfg.setdefault("session_name", "inspection realtime")
+    run_cfg.setdefault("output_dir", "data/streaming_input")
+    run_cfg.setdefault("session_name", "streaming_input")
     run_cfg.setdefault("target_fps", 10.0)
     run_cfg.setdefault("latency_sla_ms", 100.0)
     run_cfg.setdefault("max_frames", None)
@@ -112,18 +113,14 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     pre_cfg["normalize"] = normalize_cfg
     resolved["preprocessing"] = pre_cfg
 
-    change_cfg = dict(resolved.get("object_change", {}))
-    change_cfg.setdefault("embedding_size", 24)
-    change_cfg.setdefault("distance_threshold", 0.12)
-    change_cfg.setdefault("reference_bank_size", 24)
-    change_cfg.setdefault("consecutive_different_frames", 3)
-    change_cfg.setdefault("min_confidence", 0.15)
-    resolved["object_change"] = change_cfg
-
-    calibration_cfg = dict(resolved.get("calibration", {}))
-    calibration_cfg.setdefault("min_frames", 20)
-    calibration_cfg.setdefault("require_baseline", True)
-    resolved["calibration"] = calibration_cfg
+    for section_name in ("object_change", "calibration"):
+        if section_name in resolved:
+            warnings.warn(
+                f"Ignoring deprecated runtime config section '{section_name}'.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            resolved.pop(section_name, None)
 
     web_cfg = dict(resolved.get("web", {}))
     web_cfg.setdefault("enabled", True)

@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from inspection_realtime.app import InspectionRuntimeApp
-from inspection_realtime.settings import DEFAULT_SETTINGS_FILE, load_settings
+from streaming_input.app import StreamingInputApp
+from streaming_input.settings import DEFAULT_SETTINGS_FILE, load_settings
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +39,7 @@ def main() -> None:
         cfg.setdefault("web", {})
         cfg["web"]["enabled"] = False
 
-    app = InspectionRuntimeApp(cfg)
+    app = StreamingInputApp(cfg)
     session_dir = app.run()
     print(f"Runtime session saved to: {session_dir}")
 

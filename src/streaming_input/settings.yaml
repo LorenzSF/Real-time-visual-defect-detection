@@ -1,6 +1,6 @@
 run:
-  output_dir: "data/inspection realtime"
-  session_name: "inspection realtime"
+  output_dir: "data/streaming_input"
+  session_name: "streaming_input"
   target_fps: 10.0
   latency_sla_ms: 100.0
   max_frames: 60
@@ -24,17 +24,6 @@ preprocessing:
   normalize:
     enabled: true
     mode: "0_1"
-
-object_change:
-  embedding_size: 24
-  distance_threshold: 0.12
-  reference_bank_size: 24
-  consecutive_different_frames: 3
-  min_confidence: 0.15
-
-calibration:
-  min_frames: 20
-  require_baseline: true
 
 web:
   enabled: true

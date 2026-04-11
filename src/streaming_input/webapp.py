@@ -16,7 +16,7 @@ HTML_PAGE = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Inspection Realtime</title>
+  <title>streaming_input</title>
   <style>
     :root {
       --bg: #f3f4ef;
@@ -69,8 +69,6 @@ HTML_PAGE = """<!doctype html>
       font-size: 28px;
       font-weight: 700;
     }
-    .value.state-CALIBRATION { color: #a16207; }
-    .value.state-PRODUCTION { color: var(--accent); }
     .section {
       display: grid;
       grid-template-columns: 1.3fr 1fr;
@@ -111,8 +109,8 @@ HTML_PAGE = """<!doctype html>
 </head>
 <body>
   <main>
-    <h1>Inspection Realtime</h1>
-    <div class="subtitle">Live monitoring for calibration and production states.</div>
+    <h1>streaming_input</h1>
+    <div class="subtitle">Live monitoring for realtime inspection decisions.</div>
     <div class="grid" id="cards"></div>
     <div class="section">
       <div class="card">
@@ -136,17 +134,13 @@ HTML_PAGE = """<!doctype html>
   </main>
   <script>
     const cardOrder = [
-      ["state", "State"],
       ["active_model", "Active Model"],
       ["frames_seen", "Frames Seen"],
       ["decisions_emitted", "Decisions"],
       ["fail_count", "Fail Count"],
-      ["no_decision_count", "No Decision"],
-      ["object_change_count", "Object Changes"],
       ["mean_latency_ms", "Mean Latency (ms)"],
       ["p95_latency_ms", "P95 Latency (ms)"],
       ["processed_fps", "Processed FPS"],
-      ["classifier_confidence", "Classifier Confidence"],
       ["threshold", "Threshold"]
     ];
 
@@ -166,11 +160,10 @@ HTML_PAGE = """<!doctype html>
       root.innerHTML = "";
       for (const [key, label] of cardOrder) {
         const card = document.createElement("div");
-        const valueClass = key === "state" ? `value state-${data[key]}` : "value";
         card.className = "card";
         card.innerHTML = `
           <div class="label">${label}</div>
-          <div class="${valueClass}">${formatValue(key, data[key])}</div>
+          <div class="value">${formatValue(key, data[key])}</div>
         `;
         root.appendChild(card);
       }
@@ -217,7 +210,7 @@ HTML_PAGE = """<!doctype html>
 
 
 class _RuntimeDashboardHandler(BaseHTTPRequestHandler):
-    server_version = "InspectionRuntime/0.1"
+    server_version = "streaming_input/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)

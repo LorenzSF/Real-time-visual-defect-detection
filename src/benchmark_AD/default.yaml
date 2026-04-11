@@ -36,18 +36,11 @@ preprocessing:
     enabled: true
     mode: "0_1"
 
-corruption:
-  enabled: false
-  type: "gaussian_noise"      # gaussian_noise | gaussian_blur | resolution_reduction
-  params:
-    sigma: 10.0
-    ksize: 5
-    scale: 0.5
 
 # Single-model mode (used when benchmark.models is omitted).
 model:
-  name: "rd4ad"
-  threshold: 0.5
+  name: "csflow"
+  threshold: 0.1
   thresholding:
     mode: "fixed"             # fixed | val_f1 | val_quantile
     target_fpr: 0.01
@@ -99,8 +92,8 @@ model:
 benchmark:
   save_umap: true
   models:
-    - name: "rd4ad"
-      threshold: 0.5
+    - name: "csflow"
+      threshold: 0.1
     #   rd4ad:
     #     epochs: 1
     # - name: "anomalib_patchcore"

@@ -4,9 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
-
-from .contracts import CalibrationBaseline, RuntimeArtifact
+from .contracts import RuntimeArtifact
 
 
 def _safe_name(text: str) -> str:
@@ -68,30 +66,7 @@ def load_runtime_artifact(
 
     summary_row = _select_summary_row(summary_rows, model_name=model_name)
     validation_predictions_path = run_dir / f"validation_predictions_{_safe_name(model_name)}.json"
-    validation_rows = _load_json(validation_predictions_path, default=[])
-
-    normal_scores: list[float] = []
-    if isinstance(validation_rows, list):
-        for row in validation_rows:
-            if not isinstance(row, dict):
-                continue
-            label = int(row.get("label", -1))
-            if label == 0:
-                normal_scores.append(float(row.get("score", 0.0)))
-
-    if len(normal_scores) == 0 and isinstance(validation_rows, list):
-        normal_scores = [
-            float(row.get("score", 0.0))
-            for row in validation_rows
-            if isinstance(row, dict) and "score" in row
-        ]
-
-    baseline = CalibrationBaseline(
-        threshold=float(summary_row.get("threshold_used", cfg.get("model", {}).get("threshold", 0.5))),
-        score_mean=float(np.mean(normal_scores)) if normal_scores else 0.0,
-        score_std=float(np.std(normal_scores)) if normal_scores else 0.0,
-        sample_count=len(normal_scores),
-    )
+    threshold = float(summary_row.get("threshold_used", cfg.get("model", {}).get("threshold", 0.5)))
 
     return RuntimeArtifact(
         run_dir=run_dir,
@@ -100,7 +75,6 @@ def load_runtime_artifact(
         runtime_cfg=dict(cfg.get("runtime", {})),
         dataset_cfg=dict(cfg.get("dataset", {})),
         preprocessing_cfg=dict(cfg.get("preprocessing", {})),
-        threshold=baseline.threshold,
-        baseline=baseline,
+        threshold=threshold,
         validation_predictions_path=validation_predictions_path if validation_predictions_path.exists() else None,
     )

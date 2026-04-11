@@ -11,15 +11,12 @@ from .decision_engine import DecisionEngine
 from .input_handler import FolderInputHandler
 from .live_metrics import LiveMetrics
 from .model_registry import SingleModelRegistry
-from .object_classifier import RelativeObjectClassifier
 from .predictor import Predictor
 from .report_generator import RuntimeOutputWriter
-from .state_manager import RuntimeStateManager
-from .transition_detector import TransitionDetector
 from .webapp import LiveDashboardServer
 
 
-class InspectionRuntimeApp:
+class StreamingInputApp:
     def __init__(self, cfg: dict[str, Any]) -> None:
         self.cfg = resolve_runtime_settings(cfg)
 
@@ -35,22 +32,6 @@ class InspectionRuntimeApp:
             session_dir=session_dir,
             input_fps=float(self.cfg["run"]["target_fps"]),
             latency_sla_ms=float(self.cfg["run"]["latency_sla_ms"]),
-        )
-        state_manager = RuntimeStateManager(
-            min_calibration_frames=int(self.cfg["calibration"]["min_frames"]),
-            baseline_sample_count=int(artifact.baseline.sample_count),
-            require_baseline=bool(self.cfg["calibration"]["require_baseline"]),
-        )
-        object_classifier = RelativeObjectClassifier(
-            embedding_size=int(self.cfg["object_change"]["embedding_size"]),
-            distance_threshold=float(self.cfg["object_change"]["distance_threshold"]),
-            reference_bank_size=int(self.cfg["object_change"]["reference_bank_size"]),
-        )
-        transition_detector = TransitionDetector(
-            consecutive_different_frames=int(
-                self.cfg["object_change"]["consecutive_different_frames"]
-            ),
-            min_confidence=float(self.cfg["object_change"]["min_confidence"]),
         )
         decision_engine = DecisionEngine()
 
@@ -77,7 +58,7 @@ class InspectionRuntimeApp:
             sequence_mode=str(self.cfg["input"]["sequence_mode"]),
         )
 
-        status_provider = lambda: metrics.snapshot(state_manager=state_manager, artifact=artifact)
+        status_provider = lambda: metrics.snapshot(artifact=artifact)
         web_server = self._start_web_server(session_dir=session_dir, status_provider=status_provider)
         writer.write_status(status_provider())
 
@@ -91,34 +72,12 @@ class InspectionRuntimeApp:
                 frame_started = time.perf_counter()
                 metrics.record_frame_seen()
 
-                if not object_classifier.has_reference:
-                    object_classifier.reset_with_frame(frame.raw_image_bgr)
-
-                match = object_classifier.classify(frame.raw_image_bgr)
-                if transition_detector.update(match):
-                    object_classifier.reset_with_frame(frame.raw_image_bgr)
-                    transition_detector.reset()
-                    state_manager.reset_for_new_object()
-                    metrics.record_transition()
-                    match = object_classifier.classify(frame.raw_image_bgr)
-
-                metrics.record_match(match)
-
                 prediction, latency_ms = predictor.predict(frame)
                 metrics.record_latency(latency_ms)
-
-                if state_manager.state.value == "CALIBRATION":
-                    object_classifier.update_reference(frame.raw_image_bgr)
-                    state_manager.observe_calibration_score(prediction.score)
-                    metrics.record_no_decision()
-                elif not match.is_same_reference:
-                    metrics.record_no_decision()
-                else:
-                    object_classifier.update_reference(frame.raw_image_bgr)
-                    decision = decision_engine.decide(frame=frame, prediction=prediction)
-                    decision.heatmap_path = writer.save_heatmap(frame=frame, prediction=prediction)
-                    writer.append_decision(decision)
-                    metrics.record_decision(decision)
+                decision = decision_engine.decide(frame=frame, prediction=prediction)
+                decision.heatmap_path = writer.save_heatmap(frame=frame, prediction=prediction)
+                writer.append_decision(decision)
+                metrics.record_decision(decision)
 
                 writer.write_status(status_provider())
                 self._sleep_to_target(started=frame_started, target_interval=target_interval)
