@@ -7,23 +7,50 @@ from typing import Any, Dict
 import yaml
 
 
+def _read_cfg_file(path: Path) -> Dict[str, Any]:
+    suffix = path.suffix.lower()
+    with path.open("r", encoding="utf-8") as f:
+        cfg = json.load(f) if suffix == ".json" else yaml.safe_load(f)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Config must be a dictionary-like object: {path}")
+    return cfg
+
+
+def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge *overlay* onto *base*, returning a new dict.
+
+    Dict values are merged key-by-key; any other type in *overlay* replaces
+    the corresponding entry in *base*. This lets small per-dataset configs
+    override only the fields they care about (via a top-level ``_extends``).
+    """
+    out = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def load_config(path: str | Path) -> Dict[str, Any]:
-    """Load a JSON or YAML config file into a dictionary."""
+    """Load a JSON or YAML config, resolving an optional ``_extends`` chain.
+
+    When a config contains a top-level ``_extends: <path>`` key, that base
+    file is loaded first (recursively) and the current file is merged over
+    it. The ``_extends`` value is interpreted relative to the current file.
+    """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    suffix = path.suffix.lower()
-    with path.open("r", encoding="utf-8") as f:
-        if suffix == ".json":
-            cfg = json.load(f)
-        else:
-            cfg = yaml.safe_load(f)
+    cfg = _read_cfg_file(path)
+    parent_ref = cfg.pop("_extends", None)
+    if parent_ref is None:
+        return cfg
 
-    if not isinstance(cfg, dict):
-        raise ValueError(f"Config must be a dictionary-like object: {path}")
-
-    return cfg
+    parent_path = (path.parent / str(parent_ref)).resolve()
+    parent_cfg = load_config(parent_path)
+    return _deep_merge(parent_cfg, cfg)
 
 
 import csv
@@ -45,7 +72,6 @@ from benchmark_AD.data import (
     resolve_dataset_labeled,
 )
 from benchmark_AD.models import available_models, build_model
-from benchmark_AD.data import apply_corruption
 from benchmark_AD.data import (
     normalize_0_1,
     read_image_bgr,
@@ -260,16 +286,12 @@ def _run_inference(
     model_name: str,
     samples: List[Any],
     pre_cfg: Dict[str, Any],
-    corr_cfg: Dict[str, Any],
     collect_embeddings: bool,
     stage_name: str,
 ) -> Dict[str, Any]:
     do_resize = bool(pre_cfg.get("resize", {}).get("enabled", False))
     w = int(pre_cfg.get("resize", {}).get("width", 256))
     h = int(pre_cfg.get("resize", {}).get("height", 256))
-    do_corr = bool(corr_cfg.get("enabled", False))
-    corr_type = str(corr_cfg.get("type", ""))
-    corr_params = corr_cfg.get("params", {})
 
     rows: List[Dict[str, Any]] = []
     embeddings: List[np.ndarray] = []
@@ -291,8 +313,6 @@ def _run_inference(
         img = read_image_bgr(str(sample.path))
         if do_resize:
             img = resize(img, (w, h))
-        if do_corr:
-            img = apply_corruption(img, corr_type, corr_params)
         x = normalize_0_1(img)
 
         t_pred0 = time.perf_counter()
@@ -340,7 +360,6 @@ def _run_single_model(
     val_samples: List[Any],
     test_samples: List[Any],
     pre_cfg: Dict[str, Any],
-    corr_cfg: Dict[str, Any],
     save_umap: bool,
 ) -> Dict[str, Any]:
     model_name = str(model_cfg.get("name", "unknown"))
@@ -388,7 +407,6 @@ def _run_single_model(
         model_name=model_name,
         samples=val_samples,
         pre_cfg=pre_cfg,
-        corr_cfg=corr_cfg,
         collect_embeddings=False,
         stage_name="validation",
     )
@@ -434,7 +452,6 @@ def _run_single_model(
         model_name=model_name,
         samples=test_samples,
         pre_cfg=pre_cfg,
-        corr_cfg=corr_cfg,
         collect_embeddings=True,
         stage_name="test",
     )
@@ -553,7 +570,6 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
         )
 
     pre_cfg = cfg["preprocessing"]
-    corr_cfg = cfg["corruption"]
     save_umap = bool(cfg.get("benchmark", {}).get("save_umap", True))
     summary_rows: List[Dict[str, Any]] = []
 
@@ -567,7 +583,6 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
             val_samples=val_samples,
             test_samples=test_samples,
             pre_cfg=pre_cfg,
-            corr_cfg=corr_cfg,
             save_umap=save_umap,
         )
         summary_rows.append(summary)

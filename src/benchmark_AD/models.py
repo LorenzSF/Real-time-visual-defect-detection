@@ -835,7 +835,7 @@ def _build_anomalib_patchcore(
         device=str(runtime_cfg.get("resolved_device", "cpu")),
         image_size=int(an_cfg.get("image_size", 256)),
         batch_size=int(an_cfg.get("batch_size", 8)),
-        pre_trained=bool(an_cfg.get("pre_trained", False)),
+        pre_trained=bool(an_cfg.get("pre_trained", True)),
         backbone=str(an_cfg.get("backbone", "wide_resnet50_2")),
         layers=an_cfg.get("layers", ["layer2", "layer3"]),
         coreset_sampling_ratio=float(an_cfg.get("coreset_sampling_ratio", 0.1)),

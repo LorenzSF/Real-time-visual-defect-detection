@@ -39,10 +39,10 @@ preprocessing:
 
 # Single-model mode (used when benchmark.models is omitted).
 model:
-  name: "csflow"
-  threshold: 0.1
+  name: "anomalib_patchcore"
+  threshold: 0.5
   thresholding:
-    mode: "fixed"             # fixed | val_f1 | val_quantile
+    mode: "val_quantile"      # fixed | val_f1 | val_quantile
     target_fpr: 0.01
 
   rd4ad:
@@ -55,7 +55,7 @@ model:
   anomalib:
     image_size: 256
     batch_size: 8
-    pre_trained: false
+    pre_trained: true
     backbone: "wide_resnet50_2"
     layers: ["layer2", "layer3"]
     coreset_sampling_ratio: 0.1
@@ -91,28 +91,9 @@ model:
 
 benchmark:
   save_umap: true
-  models:
-    - name: "csflow"
-      threshold: 0.1
-    #   rd4ad:
-    #     epochs: 1
-    # - name: "anomalib_patchcore"
-    #   threshold: 0.5
-    #   thresholding:
-    #     mode: "val_quantile"
-    #     target_fpr: 0.01
-    #   anomalib:
-    #     pre_trained: false
-    # - name: "anomalib_padim"
-    #   threshold: 0.5
-    # - name: "anomalib_stfpm"
-    #   threshold: 0.5
-    # - name: "anomalib_csflow"
-    #   threshold: 0.5
-    # - name: "anomalib_draem"
-    #   threshold: 0.5
-    # - name: "subspacead"
-    #   threshold: 0.5
+  # When omitted (or empty) and --all-models is not passed, the single-model
+  # block above is used. Populate this list to benchmark several models in one run.
+  models: []
 
 evaluation:
   metrics: ["precision", "recall", "f1", "accuracy", "auroc", "aupr"]

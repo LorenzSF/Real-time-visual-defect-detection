@@ -1,0 +1,11 @@
+# Overlay for the Deceuninck industrial dataset.
+# The loader recognises `defects/` as the anomaly folder via _BAD_DIR_NAMES.
+_extends: ../default.yaml
+
+run:
+  run_name: "industrial_clean"
+
+dataset:
+  source_type: "folder"
+  path: "data/Deceuninck"
+  extract_dir: "data/Deceuninck"

@@ -62,7 +62,6 @@ def test_pipeline_writes_benchmark_outputs(tmp_path: Path, monkeypatch: pytest.M
             "split": {"test_ratio": 0.5, "train_on_good_only": True, "seed": 7},
         },
         "preprocessing": {"resize": {"enabled": False}, "normalize": {"enabled": True, "mode": "0_1"}},
-        "corruption": {"enabled": False, "type": "gaussian_noise", "params": {}},
         "model": {"name": "stub_model", "threshold": 0.5},
         "benchmark": {"save_umap": False, "models": [{"name": "stub_model", "threshold": 0.5}]},
         "evaluation": {"metrics": ["precision", "recall", "f1", "accuracy", "auroc", "aupr"]},

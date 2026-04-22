@@ -25,7 +25,9 @@
 |   |   |-- models.py
 |   |   |-- pipeline.py
 |   |   |-- default.yaml
-|   |   `-- sequence-format input.py
+|   |   `-- configs/
+|   |       |-- realiad.yaml
+|   |       `-- industrial.yaml
 |   `-- corruptions/
 |       |-- test_loader.py
 |       |-- test_pipeline_benchmark.py
@@ -66,10 +68,18 @@ uv sync
 
 ## Configuration
 
-Use:
+Base config:
 
 ```text
 src/benchmark_AD/default.yaml
+```
+
+Per-dataset overlays (apply only the fields that differ from the base, via the
+top-level `_extends` key resolved by `load_config`):
+
+```text
+src/benchmark_AD/configs/realiad.yaml      # standard benchmark (Real-IAD)
+src/benchmark_AD/configs/industrial.yaml   # Deceuninck industrial dataset
 ```
 
 Main config sections:
@@ -78,9 +88,9 @@ Main config sections:
 - `runtime`: device/precision/runtime tuning
 - `dataset`: source (`folder` or `zip`), path, extraction, split config
 - `preprocessing`: resize/normalization
-- `corruption`: optional synthetic corruption
 - `model`: single-model defaults and thresholding policy
-- `benchmark.models`: list of models for multi-model benchmark runs
+- `benchmark.models`: list of models for multi-model benchmark runs (empty by
+  default; populated automatically when `--all-models` is passed)
 
 Thresholding modes currently used by pipeline:
 
@@ -91,34 +101,50 @@ Thresholding modes currently used by pipeline:
 
 ## Run The Pipeline
 
-Important: use explicit `--config` for now.
+`main.py` is non-interactive. All choices are passed via flags or config files.
+Set `PYTHONPATH=src` so the `benchmark_AD` package resolves.
 
-Interactive run (dataset/model menu):
+### Single model
 
 ```powershell
 $env:PYTHONPATH='src'
-python main.py --config src/benchmark_AD/default.yaml
+python main.py --config src/benchmark_AD/default.yaml `
+  --model anomalib_patchcore `
+  --dataset-path "C:\path\to\dataset_or_zip" `
+  --run-name patchcore_smoke
 ```
 
-Explicit interactive flags:
+### All models (every registered entry that passes dependency preflight)
 
 ```powershell
 $env:PYTHONPATH='src'
-python main.py --config src/benchmark_AD/default.yaml --choose-dataset --choose-model
+python main.py --config src/benchmark_AD/default.yaml `
+  --all-models `
+  --dataset-path "C:\path\to\dataset_or_zip" `
+  --run-name allmodels_run
 ```
 
-Non-interactive run:
+### Per-dataset overlays (recommended for the Block 1.1 jobs)
 
 ```powershell
+# Job A — Real-IAD (standard benchmark), all models
 $env:PYTHONPATH='src'
-python main.py --config src/benchmark_AD/default.yaml --dataset-path "C:\path\to\dataset_or_zip" --model rd4ad --no-interactive
+python main.py --config src/benchmark_AD/configs/realiad.yaml --all-models
+
+# Job B — Deceuninck (industrial dataset), all models
+$env:PYTHONPATH='src'
+python main.py --config src/benchmark_AD/configs/industrial.yaml --all-models
 ```
 
 CLI behavior highlights:
 
-- Performs model dependency preflight before running selected model.
-- Auto-detects/keeps dataset path history in `data/.dataset_path_history.json`.
-- Fails fast when device config is invalid (for example CUDA requested but unavailable).
+- `--model` and `--all-models` are mutually exclusive.
+- Performs model dependency preflight; unavailable models are skipped (with
+  reason logged to stderr) instead of aborting the whole run.
+- `dataset.path` is required; the pipeline aborts early if it is missing or
+  the path does not exist.
+- Fails fast when device config is invalid (for example CUDA requested but
+  unavailable).
 
 ## Dataset Conventions
 
