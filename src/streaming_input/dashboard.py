@@ -1,14 +1,21 @@
+"""Live dashboard server for the streaming inference loop.
+
+This file is the four-file-layout placeholder mandated by PLAN.md §1.3 for
+the dashboard slot. The full XAI dashboard (heatmap overlay, FPS, embedding
+plot, etc.) is the deliverable of §2.1 — what ships today is the minimal
+HTTP status display previously implemented in webapp.py, kept here so the
+streaming loop continues to surface a live view without a regression.
+"""
 from __future__ import annotations
 
 import json
+import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Callable
 from urllib.parse import unquote, urlparse
-
-from .report_generator import RuntimeOutputWriter
 
 
 HTML_PAGE = """<!doctype html>
@@ -209,7 +216,11 @@ HTML_PAGE = """<!doctype html>
 """
 
 
-class _RuntimeDashboardHandler(BaseHTTPRequestHandler):
+def _guess_content_type(path: Path) -> str:
+    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+
+class _DashboardHandler(BaseHTTPRequestHandler):
     server_version = "streaming_input/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
@@ -242,7 +253,7 @@ class _RuntimeDashboardHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
         content = target.read_bytes()
-        self._write_bytes(content, RuntimeOutputWriter.guess_content_type(target))
+        self._write_bytes(content, _guess_content_type(target))
 
     def _write_bytes(self, payload: bytes, content_type: str) -> None:
         self.send_response(HTTPStatus.OK)
@@ -252,19 +263,21 @@ class _RuntimeDashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-class _RuntimeDashboardServer(ThreadingHTTPServer):
+class _DashboardServer(ThreadingHTTPServer):
     def __init__(
         self,
         address: tuple[str, int],
         session_dir: Path,
         status_provider: Callable[[], dict],
     ) -> None:
-        super().__init__(address, _RuntimeDashboardHandler)
+        super().__init__(address, _DashboardHandler)
         self.session_dir = Path(session_dir)
         self.status_provider = status_provider
 
 
 class LiveDashboardServer:
+    """Thin wrapper that runs the HTTP dashboard in a daemon thread."""
+
     def __init__(
         self,
         host: str,
@@ -274,7 +287,7 @@ class LiveDashboardServer:
     ) -> None:
         self.host = host
         self.port = int(port)
-        self._server = _RuntimeDashboardServer(
+        self._server = _DashboardServer(
             (self.host, self.port),
             session_dir=Path(session_dir),
             status_provider=status_provider,

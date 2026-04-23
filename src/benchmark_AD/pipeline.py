@@ -394,6 +394,7 @@ def _run_inference(
     h = int(pre_cfg.get("resize", {}).get("height", 256))
 
     rows: List[Dict[str, Any]] = []
+    latencies_ms: List[float] = []
     embeddings: List[np.ndarray] = []
     emb_labels: List[int] = []
     emb_paths: List[str] = []
@@ -423,7 +424,9 @@ def _run_inference(
 
         t_pred0 = time.perf_counter()
         out = model.predict(x)
-        predict_seconds += time.perf_counter() - t_pred0
+        sample_latency_s = time.perf_counter() - t_pred0
+        predict_seconds += sample_latency_s
+        latencies_ms.append(sample_latency_s * 1000.0)
         pred_is_anomaly = int(out.is_anomaly)
 
         row = {
@@ -459,6 +462,7 @@ def _run_inference(
     return {
         "rows": rows,
         "predict_seconds": predict_seconds,
+        "latencies_ms": latencies_ms,
         "embeddings": embeddings,
         "emb_labels": emb_labels,
         "emb_paths": emb_paths,
@@ -466,6 +470,81 @@ def _run_inference(
         "emb_defect_types": emb_defect_types,
         "confusion_samples": confusion_samples,
     }
+
+
+def _row_extras(
+    corruption_cfg: Optional[Dict[str, Any]],
+    corruption_fn: Optional[Any],
+    dataset_name: str,
+) -> Dict[str, Any]:
+    """Per-frame metadata that the streaming-shape JSON needs in every row.
+
+    Kept identical for clean and corrupted runs (empty/0 when disabled) so
+    downstream loaders can rely on a stable schema.
+    """
+    active = corruption_fn is not None and bool((corruption_cfg or {}).get("enabled", False))
+    return {
+        "corruption_type": str((corruption_cfg or {}).get("type", "")) if active else "",
+        "severity": int((corruption_cfg or {}).get("severity", 0)) if active else 0,
+        "dataset": dataset_name,
+    }
+
+
+def _percentile_or_zero(values: List[float], q: float) -> float:
+    if not values:
+        return 0.0
+    return float(np.percentile(np.asarray(values, dtype=np.float32), q))
+
+
+def _build_live_status(
+    out_dir: Path,
+    model_name: str,
+    rows: List[Dict[str, Any]],
+    latencies_ms: List[float],
+    threshold: float,
+    metrics: Dict[str, float],
+    extras: Dict[str, Any],
+    recent_window: int = 12,
+    fail_window: int = 8,
+) -> Dict[str, Any]:
+    """Project the per-model batch run into the streaming-session snapshot shape.
+
+    Keeps the same field names produced by the live runtime so the same loaders
+    (notebooks, dashboards) work over both batch and streaming outputs.
+    """
+    decisions_emitted = len(rows)
+    fail_count = sum(1 for row in rows if int(row.get("pred_is_anomaly", 0)) == 1)
+    total_latency_s = sum(latencies_ms) / 1000.0
+    processed_fps = float(decisions_emitted / total_latency_s) if total_latency_s > 0 else 0.0
+    recent_decisions = list(reversed(rows[-recent_window:])) if rows else []
+    recent_fails = [row for row in reversed(rows) if int(row.get("pred_is_anomaly", 0)) == 1][:fail_window]
+
+    status: Dict[str, Any] = {
+        "session_dir": str(out_dir),
+        "active_model": model_name,
+        "frames_seen": decisions_emitted,
+        "decisions_emitted": decisions_emitted,
+        "fail_count": fail_count,
+        "input_fps": 0.0,
+        "processed_fps": processed_fps,
+        "decision_fps": processed_fps,
+        "mean_latency_ms": float(np.mean(latencies_ms)) if latencies_ms else 0.0,
+        "p95_latency_ms": _percentile_or_zero(latencies_ms, 95),
+        "latency_sla_ms": 0.0,
+        "threshold": float(threshold),
+        "recent_decisions": recent_decisions,
+        "recent_fails": recent_fails,
+        "corruption_type": extras["corruption_type"],
+        "severity": extras["severity"],
+        "dataset": extras["dataset"],
+        "auroc": float(metrics.get("auroc", 0.0)),
+        "f1": float(metrics.get("f1", 0.0)),
+        "precision": float(metrics.get("precision", 0.0)),
+        "recall": float(metrics.get("recall", 0.0)),
+        "accuracy": float(metrics.get("accuracy", 0.0)),
+        "aupr": float(metrics.get("aupr", 0.0)),
+    }
+    return status
 
 
 def _run_single_model(
@@ -477,6 +556,7 @@ def _run_single_model(
     test_samples: List[Any],
     pre_cfg: Dict[str, Any],
     save_umap: bool,
+    dataset_name: str,
     corruption_cfg: Optional[Dict[str, Any]] = None,
     corruption_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
@@ -545,10 +625,6 @@ def _run_single_model(
     val_rows = val_run["rows"]
     threshold_state = _maybe_calibrate_threshold(model=model, model_cfg=model_cfg, val_rows=val_rows)
     _apply_threshold(val_rows, float(threshold_state["threshold"]))
-    (out_dir / f"validation_predictions_{_safe_name(model_name)}.json").write_text(
-        json.dumps(val_rows, indent=2),
-        encoding="utf-8",
-    )
     val_metrics = _collect_metrics_from_rows(val_rows)
     _stage_done(
         model_name=model_name,
@@ -576,6 +652,7 @@ def _run_single_model(
     )
     rows = test_run["rows"]
     predict_seconds = float(test_run["predict_seconds"])
+    test_latencies_ms = list(test_run["latencies_ms"])
     embeddings = test_run["embeddings"]
     emb_labels = test_run["emb_labels"]
     emb_paths = test_run["emb_paths"]
@@ -596,8 +673,24 @@ def _run_single_model(
         total_stages=total_stages,
         stage_name="artifacts",
     )
+    # Stamp every row with the corruption + dataset identity so the JSON is
+    # self-describing; matches the streaming-session predictions.json schema.
+    extras = _row_extras(corruption_cfg, corruption_fn, dataset_name)
+    for row in rows:
+        row.update(extras)
+        row.setdefault("heatmap_path", None)
+    for row in val_rows:
+        row.update(extras)
+        row.setdefault("heatmap_path", None)
+
     pred_path = out_dir / f"predictions_{_safe_name(model_name)}.json"
     pred_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    # Persist the validation rows with the same enriched schema; harmless
+    # for clean runs and necessary so the streaming runtime can reuse them.
+    (out_dir / f"validation_predictions_{_safe_name(model_name)}.json").write_text(
+        json.dumps(val_rows, indent=2),
+        encoding="utf-8",
+    )
 
     confusion_sample_metadata: Optional[Dict[str, Any]] = None
     if corruption_fn is not None and bool((corruption_cfg or {}).get("enabled", False)):
@@ -620,6 +713,22 @@ def _run_single_model(
         )
 
     metrics = _collect_metrics_from_rows(rows)
+
+    # Streaming-shape JSON snapshot for this (model, corruption, severity,
+    # dataset) tuple. Mirrors the fields that the live runtime publishes in
+    # data/streaming_input/<session>/live_status.json so tooling is shared.
+    live_status = _build_live_status(
+        out_dir=out_dir,
+        model_name=model_name,
+        rows=rows,
+        latencies_ms=test_latencies_ms,
+        threshold=float(threshold_state["threshold"]),
+        metrics=metrics,
+        extras=extras,
+    )
+    (out_dir / f"live_status_{_safe_name(model_name)}.json").write_text(
+        json.dumps(live_status, indent=2), encoding="utf-8"
+    )
 
     peak_vram_mb = 0.0
     if runtime_cfg["resolved_device"].startswith("cuda"):
@@ -718,6 +827,10 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
         )
 
     save_umap = bool(cfg.get("benchmark", {}).get("save_umap", True))
+    # Identify the dataset by its config path (basename of the dataset path
+    # already encodes Real-IAD vs. Deceuninck for our two configs); falls back
+    # to the run_name when no path is available.
+    dataset_name = str(Path(str(ds.get("path", ""))).name or run_cfg.get("run_name", "dataset"))
     summary_rows: List[Dict[str, Any]] = []
 
     for model_cfg in model_cfgs:
@@ -731,6 +844,7 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
             test_samples=test_samples,
             pre_cfg=pre_cfg,
             save_umap=save_umap,
+            dataset_name=dataset_name,
             corruption_cfg=corruption_cfg,
             corruption_fn=corruption_fn,
         )

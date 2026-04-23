@@ -20,6 +20,24 @@ def parse_args() -> argparse.Namespace:
         help="Path to the runtime YAML settings file.",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help=(
+            "Override cfg['artifact']['model_name']. Manual selection only — the "
+            "best benchmark model is never picked automatically."
+        ),
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help=(
+            "Override cfg['artifact']['run_dir'] with a specific benchmark run "
+            "directory. Pass 'latest' (or omit) to use the most recent run."
+        ),
+    )
+    parser.add_argument(
         "--max-frames",
         type=int,
         default=None,
@@ -56,6 +74,15 @@ def main() -> None:
     if args.no_web:
         cfg.setdefault("web", {})
         cfg["web"]["enabled"] = False
+
+    # Manual model selection via CLI — never auto-pick the best benchmark model.
+    if args.model is not None or args.run_dir is not None:
+        artifact = dict(cfg.get("artifact", {}))
+        if args.model is not None:
+            artifact["model_name"] = args.model
+        if args.run_dir is not None:
+            artifact["run_dir"] = args.run_dir
+        cfg["artifact"] = artifact
 
     # Stash the corruption choice in cfg; the streaming app picks it up in
     # block 2.2. Keeping the CLI surface symmetric with main.py now avoids a

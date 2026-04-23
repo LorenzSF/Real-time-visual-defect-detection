@@ -82,7 +82,7 @@ These apply to every file touched or created in this project:
 - Launch on GPU cluster:
   - **Job A:** Clean benchmark, standard dataset (Real-IAD), all models.
   - **Job B:** Clean benchmark, real industrial dataset (Deceuninck), all models.
-- After results: identify the **best-performing model** → this model is used for streaming.
+- After results: identify the **best-performing model** by inspecting `benchmark_summary.json` manually → this name is then passed to `runtime_main.py --model <name>` for streaming. Never auto-select.
 
 #### 1.2 — Build corruption module
 **Goal:** `src/corruptions/corruption_registry.py` integrated into the batch pipeline.
@@ -100,15 +100,28 @@ These apply to every file touched or created in this project:
 - Quick test: one model, one corruption, one dataset category.
 
 #### 1.3 — Launch corruption benchmark + start streaming module
-**Goal:** Jobs running on GPU, `streaming_input/` module skeleton ready.
+**Goal:** Job C running on GPU, JSON corruption outputs saved, `streaming_input/` ready.
 
+- Configure `src/benchmark_AD/default.yaml` and per-dataset configs (`configs/realiad.yaml`, `configs/industrial.yaml`) for:
+  - Full model list, same as Jobs A/B. No automatic model selection.
+  - `corruption:` enabled with all 6 types from §1.2 and severities `{1, 3, 5}`.
 - Launch on GPU cluster:
-  - **Job C:** Batch benchmark with corruptions, severities 1/3/5, top 2–3 models only.
+  - **Job C:** Batch benchmark with corruptions, all models × 6 corruptions × severities `{1, 3, 5}`, on Real-IAD and Deceuninck.
+- Save Job C outputs under `data/runs/<run_name>/`, one session folder per `(model × corruption × severity × dataset)`, using JSON only:
+  - `predictions.json`: per-frame records `{model, path, label, defect_type, score, pred_is_anomaly, heatmap_path, corruption_type, severity, dataset}`.
+  - `live_status.json`: session summary with streaming status keys (`active_model`, `frames_seen`, `decisions_emitted`, `mean_latency_ms`, `p95_latency_ms`, `threshold`, ...) plus `AUROC`, `F1`, `corruption_type`, `severity`, `dataset`.
+  - Shape mirrors `data/streaming_input/streaming_input_20260411_160237/`.
 - Start building `src/streaming_input/`:
-  - `settings.py`: define `DEFAULT_SETTINGS_FILE`, `load_settings(path) -> dict`.
+  - `settings.py`: keep public surface `DEFAULT_SETTINGS_FILE`, `load_settings(path) -> dict`.
   - `inference.py`: wrap the selected model to process a single image and return `{anomaly_score, anomaly_map, embedding}`.
-  - `app.py`: `StreamingInputApp` class — init loads model, `run()` iterates over image source (folder or simulated camera), calls inference per frame, saves session outputs.
-
+  - `app.py`: `StreamingInputApp` class — init loads model, `run()` iterates over image source (folder or simulated camera), calls inference per frame, saves `predictions.json` and `live_status.json`.
+  - `dashboard.py`: empty placeholder until §2.1.
+- Clean `src/streaming_input/` to contain only `app.py`, `settings.py`, `inference.py`, `dashboard.py`, and `__init__.py`:
+  - Fold folder input handling, model loading, inference contracts, and session-output writing into the flat module structure.
+  - Defer dashboard, live metrics, reports, and web app concerns to §2.1.
+  - Update `__init__.py` to export only `StreamingInputApp`, `DEFAULT_SETTINGS_FILE`, `load_settings`.
+  - Update `runtime_main.py` for manual model selection via CLI flags such as `--model <name>` and `--run-dir <path>`.
+- Verify `StreamingInputApp().run()` iterates a folder source, calls inference per frame, and writes the JSON outputs above.
 ---
 
 ### 2 — Streaming + Dashboard + Results
@@ -177,17 +190,20 @@ Dashboard must show (in a single screen, readable by a factory operator):
 
 ```
 data/runs/<run_name>/
-├── benchmark_summary.json         # Model comparison table + run context
-├── benchmark_summary_corrupted.csv # Robustness results
+├── benchmark_summary.json              # Model comparison table + run context
+├── predictions_<model>.json            # Per-frame records, streaming-shape JSON (with corruption_type, severity, dataset)
+├── live_status_<model>.json            # Per-(model × corruption × severity × dataset) session summary, streaming-shape JSON (with AUROC, F1)
 ├── plots/
-│   ├── robustness_curves.png       # AUROC vs severity per corruption type
-│   ├── model_comparison.png        # Clean benchmark comparison
-│   ├── heatmap_sample_<model>.png  # XAI heatmap examples
-│   └── embedding_umap_<model>.html # Embedding plot
+│   ├── robustness_curves.png           # AUROC vs severity per corruption type
+│   ├── model_comparison.png            # Clean benchmark comparison
+│   ├── heatmap_sample_<model>.png      # XAI heatmap examples
+│   └── embedding_umap_<model>.html     # Embedding plot
 └── streaming_session/
-    ├── dashboard_clean.png         # Dashboard screenshot, no corruption
-    └── dashboard_corrupted.png     # Dashboard screenshot, with corruption
+    ├── dashboard_clean.png             # Dashboard screenshot, no corruption
+    └── dashboard_corrupted.png         # Dashboard screenshot, with corruption
 ```
+
+Robustness results are emitted as JSON only (mirroring `data/streaming_input/<session>/`), not CSV.
 
 ---
 
