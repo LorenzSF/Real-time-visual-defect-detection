@@ -6,13 +6,13 @@ run:
   max_frames: 60
 
 artifact:
-  runs_root: "data/runs"
+  runs_root: "data/outputs"
   run_dir: null
   model_name: "rd4ad"
   fit_policy: "auto"   # auto | historical_fit | skip_fit
 
 input:
-  root_dir: "data/raw/extracted"
+  root_dir: "data/Deceuninck_dataset"
   loop: false
   sequence_mode: "interleaved_labels"
 

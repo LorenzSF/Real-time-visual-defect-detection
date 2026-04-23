@@ -124,7 +124,7 @@ python main.py --config src/benchmark_AD/default.yaml `
   --run-name allmodels_run
 ```
 
-### Per-dataset overlays (recommended for the Block 1.1 jobs)
+### Per-dataset overlays
 
 ```powershell
 # Job A — Real-IAD (standard benchmark), all models
@@ -146,6 +146,27 @@ CLI behavior highlights:
 - Fails fast when device config is invalid (for example CUDA requested but
   unavailable).
 
+### Corruption (test-set robustness)
+
+Corruptions live in `src/corruptions/corruption_registry.py`. They are applied
+to test images only (training and validation stay clean so threshold
+calibration is unaffected). Enable from the CLI:
+
+```powershell
+$env:PYTHONPATH='src'
+python main.py --config src/benchmark_AD/configs/industrial.yaml `
+  --all-models --corruption gaussian_blur --severity 3 `
+  --run-name industrial_gblur_s3
+```
+
+Or set `corruption.enabled: true` in the YAML. Available types: `gaussian_noise`,
+`gaussian_blur`, `motion_blur`, `brightness_shift`, `contrast_reduction`,
+`jpeg_compression`. Severity is an integer in `1..5`. Each summary row in
+`benchmark_summary.json` carries `corruption_type` and `corruption_severity`
+so robustness curves can be built directly from the file. The same
+`--corruption` / `--severity` flags exist on `runtime_main.py` for symmetry;
+the streaming app picks them up in block 2.2.
+
 ## Dataset Conventions
 
 Label discovery priority in `data.py`:
@@ -163,18 +184,15 @@ Supported image extensions:
 Each run creates:
 
 ```text
-data/runs/<run_name>_<UTC_YYYYMMDD_HHMMSS>/
+data/outputs/<run_name>_<UTC_YYYYMMDD_HHMMSS>/
 ```
 
 Main artifacts:
 
 - `runtime_info.json`
-- `config_snapshot.json`
+- `benchmark_summary.json`
 - `validation_predictions_<model>.json`
 - `predictions_<model>.json`
-- `predictions.json` (single-model compatibility copy)
-- `benchmark_summary.json`
-- `benchmark_summary.csv`
 - `plots/embedding_umap_<model>.html` (only when embeddings are available)
 
 

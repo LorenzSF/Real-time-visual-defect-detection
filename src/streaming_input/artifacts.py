@@ -27,6 +27,13 @@ def _resolve_model_cfg(cfg: dict[str, Any], model_name: str) -> dict[str, Any]:
     raise ValueError(f"Unable to resolve model configuration for: {model_name}")
 
 
+def _summary_rows(summary_doc: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = summary_doc.get("models", [])
+    if not isinstance(rows, list) or len(rows) == 0:
+        raise ValueError("Invalid benchmark summary: missing model rows.")
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def _select_summary_row(rows: list[dict[str, Any]], model_name: str) -> dict[str, Any]:
     for row in rows:
         if str(row.get("model")) == model_name:
@@ -45,19 +52,14 @@ def load_runtime_artifact(
     model_name: Optional[str] = None,
 ) -> RuntimeArtifact:
     run_dir = Path(run_dir).resolve()
-    config_path = run_dir / "config_snapshot.json"
     summary_path = run_dir / "benchmark_summary.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Missing config snapshot: {config_path}")
     if not summary_path.exists():
         raise FileNotFoundError(f"Missing benchmark summary: {summary_path}")
 
-    cfg = _load_json(config_path)
-    summary_rows = _load_json(summary_path, default=[])
-    if not isinstance(cfg, dict):
-        raise ValueError(f"Invalid config snapshot: {config_path}")
-    if not isinstance(summary_rows, list) or len(summary_rows) == 0:
+    summary_doc = _load_json(summary_path, default={})
+    if not isinstance(summary_doc, dict):
         raise ValueError(f"Invalid benchmark summary: {summary_path}")
+    summary_rows = _summary_rows(summary_doc)
 
     if model_name is None:
         model_name = str(summary_rows[0].get("model", ""))
@@ -66,15 +68,18 @@ def load_runtime_artifact(
 
     summary_row = _select_summary_row(summary_rows, model_name=model_name)
     validation_predictions_path = run_dir / f"validation_predictions_{_safe_name(model_name)}.json"
-    threshold = float(summary_row.get("threshold_used", cfg.get("model", {}).get("threshold", 0.5)))
+    model_cfg = summary_row.get("model_cfg")
+    if not isinstance(model_cfg, dict):
+        model_cfg = _resolve_model_cfg(summary_doc, model_name=model_name)
+    threshold = float(summary_row.get("threshold_used", model_cfg.get("threshold", 0.5)))
 
     return RuntimeArtifact(
         run_dir=run_dir,
         model_name=model_name,
-        model_cfg=_resolve_model_cfg(cfg, model_name=model_name),
-        runtime_cfg=dict(cfg.get("runtime", {})),
-        dataset_cfg=dict(cfg.get("dataset", {})),
-        preprocessing_cfg=dict(cfg.get("preprocessing", {})),
+        model_cfg=dict(model_cfg),
+        runtime_cfg=dict(summary_doc.get("runtime", {})),
+        dataset_cfg=dict(summary_doc.get("dataset", {})),
+        preprocessing_cfg=dict(summary_doc.get("preprocessing", {})),
         threshold=threshold,
         validation_predictions_path=validation_predictions_path if validation_predictions_path.exists() else None,
     )

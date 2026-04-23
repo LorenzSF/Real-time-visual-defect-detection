@@ -32,9 +32,12 @@ def _read_summary_models(run_dir: Path) -> list[str]:
     if not summary_path.exists():
         return []
     try:
-        rows = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary_doc = json.loads(summary_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
+    if not isinstance(summary_doc, dict):
+        return []
+    rows = summary_doc.get("models", [])
     if not isinstance(rows, list):
         return []
     return [str(row.get("model", "")) for row in rows if isinstance(row, dict)]
@@ -76,7 +79,7 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     resolved["run"] = run_cfg
 
     artifact_cfg = dict(resolved.get("artifact", {}))
-    artifact_cfg.setdefault("runs_root", "data/runs")
+    artifact_cfg.setdefault("runs_root", "data/outputs")
     artifact_cfg.setdefault("run_dir", None)
     artifact_cfg.setdefault("model_name", "rd4ad")
     artifact_cfg.setdefault("fit_policy", "auto")
@@ -95,7 +98,7 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     resolved["artifact"] = artifact_cfg
 
     input_cfg = dict(resolved.get("input", {}))
-    input_cfg.setdefault("root_dir", "data/raw/extracted")
+    input_cfg.setdefault("root_dir", "data/Deceuninck_dataset")
     input_cfg.setdefault("loop", False)
     input_cfg.setdefault("sequence_mode", "interleaved_labels")
     resolved["input"] = input_cfg

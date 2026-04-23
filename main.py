@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from benchmark_AD.models import available_models, model_dependencies
 from benchmark_AD.pipeline import load_config, run_pipeline
+from corruptions.corruption_registry import (
+    SEVERITY_LEVELS,
+    available_corruptions,
+)
 
 
 DEFAULT_CONFIG_FILE = Path("src") / "benchmark_AD" / "default.yaml"
@@ -100,7 +104,7 @@ def _apply_all_models(cfg: Dict[str, Any]) -> List[str]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Run the anomaly-detection benchmark pipeline (non-interactive)."
+        description="Run the anomaly-detection benchmark pipeline."
     )
     p.add_argument(
         "--config",
@@ -137,6 +141,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override cfg['run']['run_name']; shapes the output subdir name.",
     )
+    p.add_argument(
+        "--corruption",
+        type=str,
+        default=None,
+        choices=list(available_corruptions()),
+        help="Apply this corruption to test images. Enables cfg['corruption'].",
+    )
+    p.add_argument(
+        "--severity",
+        type=int,
+        default=None,
+        choices=list(SEVERITY_LEVELS),
+        help="Severity (1..5) used when --corruption is set or in the config.",
+    )
     return p.parse_args()
 
 
@@ -157,6 +175,18 @@ def main() -> None:
         cfg["dataset"]["extract_dir"] = args.extract_dir
     if args.run_name is not None:
         cfg["run"]["run_name"] = args.run_name
+
+    # CLI corruption flags override the YAML; passing --corruption alone enables
+    # the section, passing --severity alone tweaks the configured corruption.
+    if args.corruption is not None or args.severity is not None:
+        corr = dict(cfg.get("corruption", {}))
+        if args.corruption is not None:
+            corr["type"] = args.corruption
+            corr["enabled"] = True
+        if args.severity is not None:
+            corr["severity"] = args.severity
+        corr.setdefault("enabled", True)
+        cfg["corruption"] = corr
 
     dataset_path = cfg["dataset"].get("path")
     if dataset_path is None:

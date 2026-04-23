@@ -53,7 +53,6 @@ def load_config(path: str | Path) -> Dict[str, Any]:
     return _deep_merge(parent_cfg, cfg)
 
 
-import csv
 import json
 import sys
 import time
@@ -61,6 +60,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import cv2
 import numpy as np
 import torch
 from sklearn.metrics import precision_recall_curve
@@ -77,6 +77,7 @@ from benchmark_AD.data import (
     read_image_bgr,
     resize,
 )
+from corruptions.corruption_registry import get_corruption
 
 
 def _safe_name(text: str) -> str:
@@ -185,15 +186,6 @@ def _save_umap(
     fig.write_html(str(plots_dir / f"embedding_umap_{_safe_name(model_name)}.html"))
 
 
-def _write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
-    if not rows:
-        return
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _model_cfgs(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     bench_cfg = cfg.get("benchmark", {})
     models = bench_cfg.get("models")
@@ -281,6 +273,113 @@ def _maybe_calibrate_threshold(
     return result
 
 
+def _build_corruption_fn(
+    corruption_cfg: Dict[str, Any],
+) -> Optional[Any]:
+    """Return a per-image callable when corruption is enabled, else ``None``.
+
+    Validation happens here (not lazily per frame) so a misconfigured run
+    aborts before any model is loaded.
+    """
+    if not corruption_cfg or not bool(corruption_cfg.get("enabled", False)):
+        return None
+    name = str(corruption_cfg["type"])
+    severity = int(corruption_cfg["severity"])
+    return get_corruption(name, severity)
+
+
+def _confusion_case(label: int, pred_is_anomaly: int) -> Optional[str]:
+    if label == 1 and pred_is_anomaly == 1:
+        return "TP"
+    if label == 0 and pred_is_anomaly == 1:
+        return "FP"
+    if label == 1 and pred_is_anomaly == 0:
+        return "FN"
+    if label == 0 and pred_is_anomaly == 0:
+        return "TN"
+    return None
+
+
+def _update_confusion_sample(
+    candidates: Dict[str, Dict[str, Any]],
+    case: Optional[str],
+    image: np.ndarray,
+    row: Dict[str, Any],
+    threshold: float,
+) -> None:
+    if case is None:
+        return
+
+    distance = abs(float(row["score"]) - threshold)
+    current = candidates.get(case)
+    if current is not None and distance >= float(current["distance_to_threshold"]):
+        return
+
+    candidates[case] = {
+        "case": case,
+        "image": image.copy(),
+        "row": dict(row),
+        "threshold": threshold,
+        "distance_to_threshold": distance,
+    }
+
+
+def _export_corrupted_confusion_samples(
+    out_dir: Path,
+    model_name: str,
+    candidates: Dict[str, Dict[str, Any]],
+    corruption_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Save one corrupted input image per available confusion class."""
+    samples_dir = out_dir / "corrupted_confusion_samples" / _safe_name(model_name)
+    samples_dir.mkdir(parents=True, exist_ok=True)
+
+    exported: List[Dict[str, Any]] = []
+    for case in ("TP", "FP", "FN", "TN"):
+        candidate = candidates.get(case)
+        if candidate is None:
+            continue
+
+        row = candidate["row"]
+        original_path = Path(str(row["path"]))
+        file_name = f"{original_path.stem}_{case}.png"
+        output_path = samples_dir / file_name
+        if not cv2.imwrite(str(output_path), candidate["image"]):
+            raise OSError(f"Failed to write corrupted confusion sample: {output_path}")
+
+        exported.append(
+            {
+                "case": case,
+                "original_path": str(original_path),
+                "saved_path": str(output_path.relative_to(out_dir)),
+                "score": float(row["score"]),
+                "threshold": float(candidate["threshold"]),
+                "distance_to_threshold": float(candidate["distance_to_threshold"]),
+                "label": int(row["label"]),
+                "pred_is_anomaly": int(row["pred_is_anomaly"]),
+                "defect_type": row.get("defect_type"),
+            }
+        )
+
+    metadata = {
+        "model": model_name,
+        "corruption": {
+            "type": str(corruption_cfg.get("type", "")),
+            "severity": int(corruption_cfg.get("severity", 0)),
+        },
+        "selection": "closest_to_threshold",
+        "available_cases": [item["case"] for item in exported],
+        "missing_cases": [
+            case for case in ("TP", "FP", "FN", "TN") if case not in candidates
+        ],
+        "samples": exported,
+    }
+    (samples_dir / "metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
+    return metadata
+
+
 def _run_inference(
     model: Any,
     model_name: str,
@@ -288,6 +387,7 @@ def _run_inference(
     pre_cfg: Dict[str, Any],
     collect_embeddings: bool,
     stage_name: str,
+    corruption_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     do_resize = bool(pre_cfg.get("resize", {}).get("enabled", False))
     w = int(pre_cfg.get("resize", {}).get("width", 256))
@@ -301,6 +401,8 @@ def _run_inference(
     emb_defect_types: List[Optional[str]] = []
     allow_embeddings = collect_embeddings
     predict_seconds = 0.0
+    confusion_samples: Dict[str, Dict[str, Any]] = {}
+    threshold = float(getattr(model, "threshold", 0.5))
 
     for sample in tqdm(
         samples,
@@ -313,22 +415,35 @@ def _run_inference(
         img = read_image_bgr(str(sample.path))
         if do_resize:
             img = resize(img, (w, h))
+        # Corruption acts on the resized BGR uint8 frame; normalization is
+        # applied afterwards so the model still sees its expected dtype/range.
+        if corruption_fn is not None:
+            img = corruption_fn(img)
         x = normalize_0_1(img)
 
         t_pred0 = time.perf_counter()
         out = model.predict(x)
         predict_seconds += time.perf_counter() - t_pred0
+        pred_is_anomaly = int(out.is_anomaly)
 
-        rows.append(
-            {
-                "model": model_name,
-                "path": str(sample.path),
-                "label": sample.label,
-                "defect_type": sample.defect_type,
-                "score": float(out.score),
-                "pred_is_anomaly": int(out.is_anomaly),
-            }
-        )
+        row = {
+            "model": model_name,
+            "path": str(sample.path),
+            "label": sample.label,
+            "defect_type": sample.defect_type,
+            "score": float(out.score),
+            "pred_is_anomaly": pred_is_anomaly,
+        }
+        rows.append(row)
+
+        if corruption_fn is not None and stage_name == "test":
+            _update_confusion_sample(
+                candidates=confusion_samples,
+                case=_confusion_case(int(sample.label), pred_is_anomaly),
+                image=img,
+                row=row,
+                threshold=threshold,
+            )
 
         if allow_embeddings:
             emb = model.get_embedding(x)
@@ -349,6 +464,7 @@ def _run_inference(
         "emb_paths": emb_paths,
         "emb_scores": emb_scores,
         "emb_defect_types": emb_defect_types,
+        "confusion_samples": confusion_samples,
     }
 
 
@@ -361,6 +477,8 @@ def _run_single_model(
     test_samples: List[Any],
     pre_cfg: Dict[str, Any],
     save_umap: bool,
+    corruption_cfg: Optional[Dict[str, Any]] = None,
+    corruption_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     model_name = str(model_cfg.get("name", "unknown"))
     model = build_model(model_cfg, runtime_cfg)
@@ -454,6 +572,7 @@ def _run_single_model(
         pre_cfg=pre_cfg,
         collect_embeddings=True,
         stage_name="test",
+        corruption_fn=corruption_fn,
     )
     rows = test_run["rows"]
     predict_seconds = float(test_run["predict_seconds"])
@@ -462,6 +581,7 @@ def _run_single_model(
     emb_paths = test_run["emb_paths"]
     emb_scores = test_run["emb_scores"]
     emb_defect_types = test_run["emb_defect_types"]
+    confusion_samples = test_run["confusion_samples"]
     _stage_done(
         model_name=model_name,
         stage_idx=4,
@@ -478,6 +598,15 @@ def _run_single_model(
     )
     pred_path = out_dir / f"predictions_{_safe_name(model_name)}.json"
     pred_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+    confusion_sample_metadata: Optional[Dict[str, Any]] = None
+    if corruption_fn is not None and bool((corruption_cfg or {}).get("enabled", False)):
+        confusion_sample_metadata = _export_corrupted_confusion_samples(
+            out_dir=out_dir,
+            model_name=model_name,
+            candidates=confusion_samples,
+            corruption_cfg=corruption_cfg or {},
+        )
 
     if save_umap and len(embeddings) > 0:
         _save_umap(
@@ -516,6 +645,23 @@ def _run_single_model(
     for key, value in val_metrics.items():
         summary[f"val_{key}"] = value
     summary.update(metrics)
+    summary["model_cfg"] = dict(model_cfg)
+
+    # Persist corruption identity per row so block 1.3 can build robustness
+    # curves directly from benchmark_summary.json without cross-referencing.
+    corr_active = corruption_fn is not None and bool((corruption_cfg or {}).get("enabled", False))
+    summary["corruption_type"] = str((corruption_cfg or {}).get("type", "")) if corr_active else ""
+    summary["corruption_severity"] = (
+        int((corruption_cfg or {}).get("severity", 0)) if corr_active else 0
+    )
+    if confusion_sample_metadata is not None:
+        summary["corrupted_confusion_samples"] = {
+            "directory": str(
+                Path("corrupted_confusion_samples") / _safe_name(model_name)
+            ),
+            "available_cases": confusion_sample_metadata["available_cases"],
+            "missing_cases": confusion_sample_metadata["missing_cases"],
+        }
     _stage_done(
         model_name=model_name,
         stage_idx=5,
@@ -538,13 +684,6 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
     runtime_cfg = _resolve_runtime(cfg.get("runtime", {}))
     (out_dir / "runtime_info.json").write_text(
         json.dumps(_runtime_info(runtime_cfg), indent=2), encoding="utf-8"
-    )
-
-    # Persist the exact runtime config with resolved device for reproducibility.
-    cfg_snapshot = dict(cfg)
-    cfg_snapshot["runtime"] = dict(runtime_cfg)
-    (out_dir / "config_snapshot.json").write_text(
-        json.dumps(cfg_snapshot, indent=2), encoding="utf-8"
     )
 
     ds = cfg["dataset"]
@@ -570,6 +709,14 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
         )
 
     pre_cfg = cfg["preprocessing"]
+    corruption_cfg = dict(cfg.get("corruption", {}))
+    corruption_fn = _build_corruption_fn(corruption_cfg)
+    if corruption_fn is not None:
+        print(
+            f"[Benchmark] Corruption active on test set: "
+            f"type={corruption_cfg['type']}, severity={corruption_cfg['severity']}"
+        )
+
     save_umap = bool(cfg.get("benchmark", {}).get("save_umap", True))
     summary_rows: List[Dict[str, Any]] = []
 
@@ -584,17 +731,26 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
             test_samples=test_samples,
             pre_cfg=pre_cfg,
             save_umap=save_umap,
+            corruption_cfg=corruption_cfg,
+            corruption_fn=corruption_fn,
         )
         summary_rows.append(summary)
 
-    if len(model_cfgs) == 1:
-        single_name = _safe_name(str(model_cfgs[0]["name"]))
-        src = out_dir / f"predictions_{single_name}.json"
-        (out_dir / "predictions.json").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-
+    summary_payload = {
+        "run": {
+            "seed": seed,
+            "output_dir": str(out_root),
+            "run_name": str(run_cfg.get("run_name", "run")),
+            "run_id": run_id,
+        },
+        "runtime": dict(runtime_cfg),
+        "dataset": dict(ds),
+        "preprocessing": dict(pre_cfg),
+        "corruption": dict(corruption_cfg),
+        "models": summary_rows,
+    }
     (out_dir / "benchmark_summary.json").write_text(
-        json.dumps(summary_rows, indent=2), encoding="utf-8"
+        json.dumps(summary_payload, indent=2), encoding="utf-8"
     )
-    _write_csv(out_dir / "benchmark_summary.csv", summary_rows)
 
     return out_dir

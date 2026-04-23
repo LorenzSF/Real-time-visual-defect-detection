@@ -80,10 +80,10 @@ Dashboard layout
 ----------------
 The dashboard is organised into three sections:
 
-1. **Run selector** — dropdown populated from the ``data/runs/`` directory that
+1. **Run selector** — dropdown populated from the ``data/outputs/`` directory that
    lets the user switch between multiple saved pipeline runs without restarting
    the server.  Selecting a run reloads all charts from the corresponding
-   ``predictions.json`` and ``config_snapshot.json``.
+   ``benchmark_summary.json`` and ``predictions_<model>.json`` artifacts.
 
 2. **Summary panel** — key-metric cards showing total samples, precision,
    recall, F1, accuracy, and AUROC for the selected run.
@@ -101,7 +101,7 @@ Typical usage
 ::
 
 
-    run_dashboard(runs_dir="data/runs", host="127.0.0.1", port=8050, debug=True)
+    run_dashboard(runs_dir="data/outputs", host="127.0.0.1", port=8050, debug=True)
 """
 
 
@@ -110,7 +110,7 @@ from typing import Optional
 
 
 def build_app(
-    runs_dir: str | Path = "data/runs",
+    runs_dir: str | Path = "data/outputs",
     default_run: Optional[str] = None,
 ):
     """Construct and return the Dash application instance.
@@ -125,8 +125,8 @@ def build_app(
     runs_dir:
         Directory that contains timestamped run subdirectories produced by
         :func:`~benchmark_AD.pipeline.run_pipeline`.
-        Each subdirectory must contain ``predictions.json`` and
-        ``config_snapshot.json``.
+        Each subdirectory must contain ``benchmark_summary.json`` and at least
+        one ``predictions_<model>.json`` file.
     default_run:
         Name of the run subdirectory to load on startup.  When ``None`` the
         most recently modified run is selected automatically.
@@ -140,7 +140,7 @@ def build_app(
 
 
 def run_dashboard(
-    runs_dir: str | Path = "data/runs",
+    runs_dir: str | Path = "data/outputs",
     host: str = "127.0.0.1",
     port: int = 8050,
     debug: bool = False,
@@ -172,7 +172,7 @@ def run_dashboard(
 
 """Static chart generation for defect detection run results.
 
-This module provides functions that consume the ``predictions.json`` output
+This module provides functions that consume a ``predictions_<model>.json`` output
 produced by :func:`~benchmark_AD.pipeline.run_pipeline`
 and generate publication-ready figures using Plotly.
 
@@ -181,7 +181,7 @@ Typical usage
 ::
 
 
-    records = json.loads(Path("data/runs/baseline_.../predictions.json").read_text())
+    records = json.loads(Path("data/outputs/baseline_.../predictions_stub_model.json").read_text())
 
     fig = plot_score_distribution(records)
     fig.write_html("score_dist.html")
@@ -209,7 +209,7 @@ def plot_score_distribution(
     Parameters
     ----------
     records:
-        List of prediction dicts as written to ``predictions.json``.  Each
+        List of prediction dicts as written to ``predictions_<model>.json``. Each
         dict must contain at least ``"label"`` (int) and ``"score"`` (float).
     threshold:
         Decision threshold to overlay as a vertical line.
@@ -238,7 +238,7 @@ def plot_roc_curve(
     Parameters
     ----------
     records:
-        List of prediction dicts from ``predictions.json``.  Each dict must
+        List of prediction dicts from ``predictions_<model>.json``. Each dict must
         contain ``"label"`` (int) and ``"score"`` (float).
     title:
         Chart title string.
@@ -266,7 +266,7 @@ def plot_confusion_matrix(
     Parameters
     ----------
     records:
-        List of prediction dicts from ``predictions.json``.
+        List of prediction dicts from ``predictions_<model>.json``.
     labels:
         Display names for the two classes.  Defaults to
         ``["Normal", "Anomalous"]``.
@@ -295,7 +295,7 @@ def plot_scores_by_defect_type(
     Parameters
     ----------
     records:
-        List of prediction dicts from ``predictions.json``.  Each defective
+        List of prediction dicts from ``predictions_<model>.json``. Each defective
         record should contain a ``"defect_type"`` key (or ``null`` if the
         category is unknown).
     title:

@@ -165,18 +165,15 @@ Supported image extensions:
 Each run creates:
 
 ```text
-data/runs/<run_name>_<UTC_YYYYMMDD_HHMMSS>/
+data/outputs/<run_name>_<UTC_YYYYMMDD_HHMMSS>/
 ```
 
 Main artifacts:
 
 - `runtime_info.json`
-- `config_snapshot.json`
+- `benchmark_summary.json`
 - `validation_predictions_<model>.json`
 - `predictions_<model>.json`
-- `predictions.json` (single-model compatibility copy)
-- `benchmark_summary.json`
-- `benchmark_summary.csv`
 - `plots/embedding_umap_<model>.html` (only when embeddings are available)
 
 

@@ -22,7 +22,7 @@ _LABEL_JSON_NAMES = {
     "metadata.json",
 }
 
-_BAD_DIR_NAMES = ("bad", "defects", "defective", "anomaly", "anomalous")
+_BAD_DIR_NAMES = ("bad", "defects", "defective", "anomaly", "anomalous","NG")
 _JSON_PATH_KEYS = ("path", "file", "filename", "image", "name")
 _JSON_LABEL_KEYS = ("label", "class", "category", "is_anomaly", "split")
 

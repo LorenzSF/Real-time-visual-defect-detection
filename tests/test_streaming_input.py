@@ -30,7 +30,7 @@ def _frame(image: np.ndarray, frame_id: int = 0) -> FramePacket:
 
 def test_resolve_runtime_settings_warns_and_drops_legacy_sections():
     cfg = {
-        "artifact": {"run_dir": "data/runs/example"},
+        "artifact": {"run_dir": "data/outputs/example"},
         "object_change": {"distance_threshold": 0.5},
         "calibration": {"min_frames": 20},
     }

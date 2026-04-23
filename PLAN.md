@@ -75,7 +75,7 @@ These apply to every file touched or created in this project:
 ### 1 — Benchmark + Corruptions + GPU Runs
 
 #### 1.1 — Stabilize and run batch benchmark
-**Goal:** `benchmark_summary.csv` with AUROC, F1, and inference time per model, on both datasets.
+**Goal:** `benchmark_summary.json` with AUROC, F1, and inference time per model, on both datasets.
 
 - Verify `main.py` runs end-to-end with all supported models.
 - Fix any model-loading or evaluation bugs found during the run.
@@ -94,7 +94,7 @@ These apply to every file touched or created in this project:
   - `brightness_shift` — uniform exposure change
   - `contrast_reduction` — reduce dynamic range
   - `jpeg_compression` — lossy compression artifact
-  - `rectangular_occlusion` — random black rectangle simulating obstruction
+
 - Expose a `get_corruption(name, severity)` factory function as the public API.
 - Wire into `default.yaml` via existing `corruption:` section (key: `type`, `severity`).
 - Quick test: one model, one corruption, one dataset category.
@@ -177,7 +177,7 @@ Dashboard must show (in a single screen, readable by a factory operator):
 
 ```
 data/runs/<run_name>/
-├── benchmark_summary.csv          # Model comparison table
+├── benchmark_summary.json         # Model comparison table + run context
 ├── benchmark_summary_corrupted.csv # Robustness results
 ├── plots/
 │   ├── robustness_curves.png       # AUROC vs severity per corruption type

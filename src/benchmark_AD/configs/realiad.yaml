@@ -7,5 +7,5 @@ run:
 
 dataset:
   source_type: "zip"
-  path: "data/Real-IAD/realiad_1024/audiojack.zip"
-  extract_dir: "data/raw/extracted/realiad_audiojack"
+  path: "data/Real-IAD_dataset/realiad_1024/audiojack.zip"
+  extract_dir: "data/Real-IAD_dataset/extracted/realiad_audiojack"

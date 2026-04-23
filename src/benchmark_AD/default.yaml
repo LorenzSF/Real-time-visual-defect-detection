@@ -1,6 +1,6 @@
 run:
   seed: 42
-  output_dir: "data/runs"
+  output_dir: "data/outputs"
   run_name: "baseline"
 
 runtime:
@@ -12,8 +12,8 @@ runtime:
 
 dataset:
   source_type: "folder"
-  path: "data/raw/extracted"
-  extract_dir: "data/raw/extracted"
+  path: "data/Deceuninck_dataset"
+  extract_dir: "data/Deceuninck_dataset"
   image_glob: "**/*.png"
 
   split:
@@ -36,8 +36,15 @@ preprocessing:
     enabled: true
     mode: "0_1"
 
+# Synthetic corruption applied to test-set images only (training/validation
+# stay clean so threshold calibration is unaffected). Disabled by default;
+# enable from a per-run overlay or via --corruption / --severity on the CLI.
+corruption:
+  enabled: false
+  type: "gaussian_noise"        # see src/corruptions/corruption_registry.py
+  severity: 3                   # 1..5
 
-# Single-model mode (used when benchmark.models is omitted).
+# Single-model mode
 model:
   name: "anomalib_patchcore"
   threshold: 0.5

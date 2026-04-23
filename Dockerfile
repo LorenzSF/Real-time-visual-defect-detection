@@ -65,5 +65,5 @@ RUN rm -rf /app/data && \
 VOLUME ["/data", "/config"]
 
 # Additional CLI args can be passed after the image name, e.g.:
-# docker run ... image --dataset-path /data/raw/sample.zip --extract-dir /data/raw/extracted
+# docker run ... image --dataset-path /data/Real-IAD_dataset/realiad_1024/audiojack.zip --extract-dir /data/Real-IAD_dataset/extracted/realiad_audiojack
 ENTRYPOINT ["sh", "-c", "exec python scripts/main.py --config \"$PIPELINE_CONFIG\" \"$@\"", "--"]

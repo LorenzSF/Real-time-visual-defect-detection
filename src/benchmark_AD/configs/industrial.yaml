@@ -7,5 +7,5 @@ run:
 
 dataset:
   source_type: "folder"
-  path: "data/Deceuninck"
-  extract_dir: "data/Deceuninck"
+  path: "data/Deceuninck_dataset"
+  extract_dir: "data/Deceuninck_dataset"

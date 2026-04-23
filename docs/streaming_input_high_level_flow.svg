@@ -43,9 +43,9 @@
 
   <rect class="box-output" x="830" y="210" width="420" height="134"/>
   <text class="label" x="854" y="252">Saved run artifacts</text>
-  <text class="text" x="854" y="282">config_snapshot.json</text>
-  <text class="text" x="854" y="306">benchmark_summary.json</text>
-  <text class="text" x="854" y="330">model checkpoint / run directory context</text>
+  <text class="text" x="854" y="282">benchmark_summary.json</text>
+  <text class="text" x="854" y="306">predictions_&lt;model&gt;.json</text>
+  <text class="text" x="854" y="330">model config + run directory context</text>
 
   <path class="line" d="M350 277 L430 277"/>
   <path class="line" d="M750 277 L830 277"/>
