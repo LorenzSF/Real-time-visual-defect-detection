@@ -16,6 +16,15 @@ dataset:
   extract_dir: "data/Deceuninck_dataset"
   image_glob: "**/*.png"
 
+  # Dataset layout hint. "auto" uses the legacy good/bad + JSON detection;
+  # "real_iad" reads OK/ + NG/<defect>/<S000X>/..._Cn_*.jpg (masks PNGs are
+  # skipped, sample_id is set from S000X so splits stay leakage-free).
+  format: "auto"
+
+  # Real-IAD only. "all" keeps every camera view; pass a list or comma
+  # string (e.g. [C1, C3] or "C1,C3") to restrict to specific angles.
+  cameras: "all"
+
   split:
     max_good: null
     max_bad: null

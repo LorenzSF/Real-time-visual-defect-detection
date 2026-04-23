@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(unzip -l \"data/Real-IAD_dataset/realiad_1024/audiojack.zip\")",
+      "Bash(mkdir -p /tmp/realiad_smoke)",
+      "Bash(unzip -q data/Real-IAD_dataset/realiad_1024/audiojack.zip -d /tmp/realiad_smoke/)",
+      "Read(//tmp/realiad_smoke/**)",
+      "Bash(unzip -q data/Real-IAD_dataset/realiad_1024/audiojack.zip -d data/Real-IAD_dataset/_smoke_extract)",
+      "Bash(.venv/Scripts/python -c ' *)"
     ]
   }
 }

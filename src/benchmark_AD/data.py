@@ -1,11 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import json
 import math
 import random
+import re
 import zipfile
 
 import cv2
@@ -22,9 +23,15 @@ _LABEL_JSON_NAMES = {
     "metadata.json",
 }
 
-_BAD_DIR_NAMES = ("bad", "defects", "defective", "anomaly", "anomalous","NG")
+_GOOD_DIR_NAMES = ("good", "OK")
+_BAD_DIR_NAMES = ("bad", "defects", "defective", "anomaly", "anomalous", "NG")
 _JSON_PATH_KEYS = ("path", "file", "filename", "image", "name")
 _JSON_LABEL_KEYS = ("label", "class", "category", "is_anomaly", "split")
+
+# Real-IAD images are named like `<prefix>_C<k>_<timestamp>.jpg`. The .png
+# siblings inside NG/ are segmentation masks and must be excluded from training.
+_REAL_IAD_IMAGE_EXTS = {".jpg", ".jpeg"}
+_REAL_IAD_CAMERA_RE = re.compile(r"_C([1-9]\d*)(?=[_.])")
 
 
 # ---------------------------------------------------------------------------
@@ -46,24 +53,77 @@ class LabeledSample:
         organised into sub-folders (e.g. ``bad/scratch/``).  ``None``
         for good images, unlabeled images, or bad images that are not
         further sub-categorised.
+    sample_id:
+        Group identifier shared by multiple images that depict the same
+        physical specimen (e.g. Real-IAD's ``S000X`` folder with its five
+        camera views). ``None`` when the dataset does not expose such a
+        grouping. :func:`apply_dataset_split` uses this field, when set,
+        to keep every image of the same specimen inside a single split.
+    camera:
+        Camera identifier parsed from the filename (Real-IAD ``C1``..``C5``).
+        ``None`` for datasets that do not encode multi-view captures.
     """
 
     path: Path
     label: int = -1
     defect_type: Optional[str] = field(default=None)
+    sample_id: Optional[str] = field(default=None)
+    camera: Optional[str] = field(default=None)
 
 
 # ---------------------------------------------------------------------------
 # Existing flat-list helpers (unchanged — backward compatible)
 # ---------------------------------------------------------------------------
 
-def _iter_image_paths(root_dir: Path, recursive: bool = True) -> Iterator[Path]:
-    """Yield sorted image files under *root_dir*."""
+def _iter_image_paths(
+    root_dir: Path,
+    recursive: bool = True,
+    allowed_exts: Optional[Iterable[str]] = None,
+) -> Iterator[Path]:
+    """Yield sorted image files under *root_dir*.
+
+    ``allowed_exts`` restricts the returned suffix set; defaults to
+    :data:`SUPPORTED_EXTS`. Real-IAD callers pass ``{".jpg", ".jpeg"}`` so
+    the segmentation-mask ``.png`` siblings are skipped.
+    """
+    exts = {e.lower() for e in (allowed_exts if allowed_exts is not None else SUPPORTED_EXTS)}
     walker = root_dir.rglob("*") if recursive else root_dir.iterdir()
     # Scan entries in deterministic order and keep supported image files only.
     for p in sorted(walker):
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+        if p.is_file() and p.suffix.lower() in exts:
             yield p
+
+
+def _parse_real_iad_camera(path: Path) -> Optional[str]:
+    """Return ``Cn`` when *path* has a Real-IAD ``..._Cn_...`` segment."""
+    m = _REAL_IAD_CAMERA_RE.search(path.stem)
+    return f"C{m.group(1)}" if m else None
+
+
+def _normalize_cameras(cameras: Any) -> Optional[Sequence[str]]:
+    """Turn a ``cameras`` config value into a canonical filter list.
+
+    Returns ``None`` when no filtering should apply (``all`` / missing /
+    empty). Accepts strings like ``"C1,C3"`` and lists like ``["C1","C3"]``.
+    """
+    if cameras is None:
+        return None
+    if isinstance(cameras, str):
+        value = cameras.strip().lower()
+        if value in ("", "all", "*"):
+            return None
+        cameras = [p.strip() for p in cameras.split(",") if p.strip()]
+    if not cameras:
+        return None
+    out = []
+    for cam in cameras:
+        token = str(cam).strip().upper()
+        if not token:
+            continue
+        if not token.startswith("C"):
+            token = f"C{token}"
+        out.append(token)
+    return out or None
 
 
 def _resolve_source_root(source_type: str, path: str, extract_dir: str) -> Path:
@@ -170,24 +230,93 @@ def _find_label_json(root_dir: Path) -> Optional[Path]:
 # Labeled dataset helpers
 # ---------------------------------------------------------------------------
 
-def list_labeled_images(root_dir: str | Path) -> List[LabeledSample]:
+def _list_real_iad_samples(
+    root_dir: Path,
+    cameras: Optional[Sequence[str]],
+) -> List[LabeledSample]:
+    """Collect Real-IAD samples from ``<root>/OK`` and ``<root>/NG``.
+
+    The Real-IAD layout is ``<root>/{OK|NG/<defect>}/<S000X>/<img>_Cn_*.jpg``.
+    PNG siblings inside ``NG/`` are segmentation masks and are skipped.
+    ``cameras``, when provided, restricts the returned samples to the given
+    ``C1..C5`` ids.
+    """
+    samples: List[LabeledSample] = []
+    camera_filter = set(cameras) if cameras else None
+
+    def _append(path: Path, label: int, defect_type: Optional[str]) -> None:
+        camera = _parse_real_iad_camera(path)
+        if camera_filter is not None and camera not in camera_filter:
+            return
+        # The parent directory (S000X) groups the multi-view shots of a
+        # single physical specimen; used downstream to keep splits clean.
+        samples.append(
+            LabeledSample(
+                path=path,
+                label=label,
+                defect_type=defect_type,
+                sample_id=path.parent.name,
+                camera=camera,
+            )
+        )
+
+    ok_dir = root_dir / "OK"
+    if ok_dir.is_dir():
+        for p in _iter_image_paths(ok_dir, allowed_exts=_REAL_IAD_IMAGE_EXTS):
+            _append(p, label=0, defect_type=None)
+
+    ng_dir = root_dir / "NG"
+    if ng_dir.is_dir():
+        for subdir in sorted(d for d in ng_dir.iterdir() if d.is_dir()):
+            defect_type = subdir.name
+            for p in _iter_image_paths(subdir, allowed_exts=_REAL_IAD_IMAGE_EXTS):
+                _append(p, label=1, defect_type=defect_type)
+
+    if not samples:
+        raise ValueError(
+            f"No Real-IAD images found under {root_dir}. Expected 'OK/' and/or 'NG/' subfolders."
+        )
+    return samples
+
+
+def list_labeled_images(
+    root_dir: str | Path,
+    dataset_format: Optional[str] = None,
+    cameras: Any = None,
+) -> List[LabeledSample]:
     """Return image samples with labels, using the best available source.
 
-    Detection priority
-    ------------------
+    Parameters
+    ----------
+    root_dir:
+        Dataset root containing images (recursively) or a labels JSON file.
+    dataset_format:
+        When ``"real_iad"``, use the dedicated Real-IAD reader that honours
+        the ``OK/`` + ``NG/<defect>/<S000X>/`` layout, filters mask PNGs,
+        and populates ``sample_id`` / ``camera``. Any other value (including
+        ``None``, ``"auto"``, ``"generic"``) runs the legacy auto-detection.
+    cameras:
+        Real-IAD only. ``None`` / ``"all"`` keeps every camera, otherwise
+        pass a list or comma-separated string like ``"C1,C3"``.
+
+    Detection priority (auto mode)
+    ------------------------------
     1. **JSON label file** if a recognised label file exists at
        *root_dir* (see :func:`_find_label_json`), every discovered image
        is matched by filename; unmatched images get label ``-1``.
-    2. **good / bad subdirectories** if ``good/`` or ``bad/``
-       subdirectories are present, images are labelled accordingly.
-       Sub-folders inside ``bad/`` (e.g. ``bad/scratch/``) are captured
-       as ``defect_type``.
+    2. **good|OK / bad|NG subdirectories** images under a good-class
+       folder get label 0, images under a bad-class folder (including its
+       defect-type sub-folders) get label 1.
     3. **Flat fallback** all images are returned with label ``-1``
        (unlabeled), reusing :func:`list_images`.
     """
     root_dir = Path(root_dir)
     if not root_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {root_dir}")
+
+    fmt = (dataset_format or "auto").lower()
+    if fmt == "real_iad":
+        return _list_real_iad_samples(root_dir, _normalize_cameras(cameras))
 
     samples: List[LabeledSample] = []
 
@@ -204,10 +333,13 @@ def list_labeled_images(root_dir: str | Path) -> List[LabeledSample]:
             return samples
 
     # ------------------------------------------------------------------
-    # Priority 2: good/ bad/ subdirectory convention
-    # Recognised names for the defect folder (checked in order).
+    # Priority 2: good|OK / bad|NG subdirectory convention
+    # Recognised names are checked in order; first hit wins for each side.
     # ------------------------------------------------------------------
-    good_dir = root_dir / "good"
+    good_dir = next(
+        (root_dir / name for name in _GOOD_DIR_NAMES if (root_dir / name).is_dir()),
+        root_dir / "good",  # fallback (has_good=False if none exist)
+    )
     bad_dir = next(
         (root_dir / name for name in _BAD_DIR_NAMES if (root_dir / name).is_dir()),
         root_dir / "bad",  # default (will evaluate has_bad=False if none exist)
@@ -249,13 +381,19 @@ def resolve_dataset_labeled(
     source_type: str,
     path: str,
     extract_dir: str,
+    dataset_format: Optional[str] = None,
+    cameras: Any = None,
 ) -> List[LabeledSample]:
     """Labeled counterpart of :func:`resolve_dataset`.
 
-    Returns a list of :class:`LabeledSample` objects instead of plain
-    paths.  The extraction logic is identical to the original function.
+    Extra kwargs (``dataset_format``, ``cameras``) are forwarded to
+    :func:`list_labeled_images`; defaults preserve the legacy behaviour.
     """
-    return list_labeled_images(_resolve_source_root(source_type, path, extract_dir))
+    return list_labeled_images(
+        _resolve_source_root(source_type, path, extract_dir),
+        dataset_format=dataset_format,
+        cameras=cameras,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -283,17 +421,56 @@ class SplitResult:
     test: List[LabeledSample]
 
 
+def _group_by_sample_id(
+    samples: List[LabeledSample],
+) -> List[List[LabeledSample]]:
+    """Bucket samples by ``(defect_type, sample_id)`` so multi-view shots of
+    the same specimen stay together. Items without a ``sample_id`` become
+    singleton groups, preserving per-image behaviour for datasets that do
+    not expose a grouping. Within each bucket, image order is stable
+    (input order).
+    """
+    buckets: Dict[Tuple[Any, Any], List[LabeledSample]] = {}
+    singletons: List[List[LabeledSample]] = []
+    for s in samples:
+        if s.sample_id is None:
+            # Keep singletons separate so they don't collide by defect_type alone.
+            singletons.append([s])
+            continue
+        key = (s.defect_type, s.sample_id)
+        buckets.setdefault(key, []).append(s)
+    return list(buckets.values()) + singletons
+
+
 def _cap_and_shuffle(
     samples: List[LabeledSample],
     max_count: Optional[int],
     rng: random.Random,
 ) -> List[LabeledSample]:
-    """Shuffle *samples* in-place (copy) and apply an optional cap."""
-    out = list(samples)
-    rng.shuffle(out)
-    if max_count is not None:
-        out = out[:max_count]
-    return out
+    """Shuffle *samples* (copy) and apply an optional cap.
+
+    When samples carry ``sample_id`` values, grouping is respected: whole
+    groups are shuffled and added until the cap is reached; a partial
+    group is never admitted, so caps may yield slightly fewer images than
+    requested in exchange for keeping every specimen's views together.
+    """
+    groups = _group_by_sample_id(samples)
+    rng.shuffle(groups)
+    flat = [s for g in groups for s in g]
+    if max_count is None:
+        return flat
+
+    kept: List[LabeledSample] = []
+    for g in groups:
+        if len(kept) + len(g) > max_count:
+            continue  # skip group; look for a smaller one that still fits
+        kept.extend(g)
+        if len(kept) == max_count:
+            break
+    # Guarantee at least one image even when the smallest group exceeds the cap.
+    if not kept and flat:
+        kept = flat[:max_count]
+    return kept
 
 
 def _split_group(
@@ -301,11 +478,21 @@ def _split_group(
     test_ratio: float,
     rng: random.Random,
 ) -> Tuple[List[LabeledSample], List[LabeledSample]]:
-    """Split a single group into (train, test) honoring *test_ratio*."""
-    out = list(samples)
-    rng.shuffle(out)
-    n_test = math.ceil(len(out) * test_ratio)
-    return out[n_test:], out[:n_test]
+    """Split into (train, test) honouring *test_ratio* at the group level.
+
+    Groups are defined by ``sample_id`` (see :func:`_group_by_sample_id`);
+    each group lands entirely in one side of the split, which is what
+    prevents Real-IAD's multi-view shots of the same physical specimen
+    from leaking across splits.
+    """
+    groups = _group_by_sample_id(samples)
+    rng.shuffle(groups)
+    n_test_groups = math.ceil(len(groups) * test_ratio)
+    test_groups = groups[:n_test_groups]
+    train_groups = groups[n_test_groups:]
+    train = [s for g in train_groups for s in g]
+    test = [s for g in test_groups for s in g]
+    return train, test
 
 
 def _partition_by_label(

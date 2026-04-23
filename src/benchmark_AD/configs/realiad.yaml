@@ -4,8 +4,14 @@ _extends: ../default.yaml
 
 run:
   run_name: "realiad_clean"
+  # Cluster-friendly output root; override with --run-name or by editing here.
+  output_dir: "/scratch/leuven/381/vsc38124/runs"
 
 dataset:
-  source_type: "zip"
-  path: "data/Real-IAD_dataset/realiad_1024/audiojack.zip"
-  extract_dir: "data/Real-IAD_dataset/extracted/realiad_audiojack"
+  source_type: "folder"
+  format: "real_iad"
+  # Each zip extracts as <DATASET_DIR>/<category>/<category>/{OK,NG}/...
+  # see scripts/unzip_realiad.sh.
+  path: "/scratch/leuven/381/vsc38124/datasets/Real-IAD_dataset/realiad_1024/audiojack/audiojack"
+  extract_dir: "/scratch/leuven/381/vsc38124/datasets/Real-IAD_dataset/realiad_1024/audiojack"
+  cameras: "all"

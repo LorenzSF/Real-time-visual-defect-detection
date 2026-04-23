@@ -796,7 +796,13 @@ def run_pipeline(cfg: Dict[str, Any]) -> Path:
     )
 
     ds = cfg["dataset"]
-    samples = resolve_dataset_labeled(ds["source_type"], ds["path"], ds["extract_dir"])
+    samples = resolve_dataset_labeled(
+        ds["source_type"],
+        ds["path"],
+        ds["extract_dir"],
+        dataset_format=ds.get("format"),
+        cameras=ds.get("cameras"),
+    )
     if len(samples) == 0:
         raise ValueError(
             f"No image files found for dataset source_type='{ds['source_type']}'"
