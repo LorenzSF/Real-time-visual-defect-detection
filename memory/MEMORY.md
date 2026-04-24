@@ -1,0 +1,4 @@
+- [User profile](user_profile.md) — thesis student at KU Leuven, hardware-constrained, needs GPU compute for thesis.
+- [Thesis compute strategy](project_compute_strategy.md) — where Jobs A/B/C are intended to run and why.
+- [Real-IAD layout gotchas](reference_realiad_layout.md) — path depth, PNG masks, specimen grouping, zip structure.
+- [Intentional epochs=1 in default.yaml](project_default_epochs.md) — smoke-test config, not a bug.
