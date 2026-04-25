@@ -9,7 +9,8 @@
       "Bash(unzip -q data/Real-IAD_dataset/realiad_1024/audiojack.zip -d data/Real-IAD_dataset/_smoke_extract)",
       "Bash(.venv/Scripts/python -c ' *)",
       "Bash(git -C \"c:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection\" log --oneline -20)",
-      "Bash(git -C \"c:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection\" show --stat e640151)"
+      "Bash(git -C \"c:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection\" show --stat e640151)",
+      "Bash(chmod +x /c/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection/scripts/run_jobB_colab.sh)"
     ]
   }
 }
