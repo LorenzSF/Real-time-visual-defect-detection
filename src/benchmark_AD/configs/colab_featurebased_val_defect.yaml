@@ -12,6 +12,16 @@
 #                                       calibration.
 #   * val_balance_tolerance: 0.15     → ±15% wiggle room around the
 #                                       smallest defect class.
+#   * min_train_goods: 200            → train pool floor. Raised from the
+#                                       default 50 because the v1 rerun
+#                                       (2026-04-26) showed AUROC dropped
+#                                       0.04–0.12 on cats where train
+#                                       collapsed to ~52 goods (PaDiM/
+#                                       PatchCore feature-bank starvation).
+#                                       At 200 the per-type val cap is
+#                                       scaled down further but train
+#                                       stays large enough for the
+#                                       Gaussian/coreset to fit.
 
 _extends: ../default.yaml
 
@@ -37,6 +47,7 @@ dataset:
     val_balance: "equal"
     val_bad_balance_by_type: true
     val_balance_tolerance: 0.15
+    min_train_goods: 200
 
 benchmark:
   save_umap: false
