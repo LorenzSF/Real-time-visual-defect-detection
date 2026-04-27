@@ -86,7 +86,7 @@ AD datasets.
 ## 3. Train / val / test composition is the *second* dominant axis
 
 Once the calibrator works, the next sensitivity is the **composition of
-each split**. The pipeline now exposes three knobs in
+each split**. The pipeline now exposes four knobs in
 [default.yaml#dataset.split](src/benchmark_AD/default.yaml):
 
 | Knob | Default | val_defect overlay | Effect |
@@ -94,6 +94,7 @@ each split**. The pipeline now exposes three knobs in
 | `val_balance` | `"natural"` | `"equal"` | when "equal", val ends up 50/50 good/bad. F1 curve no longer biased by val prevalence (which varies wildly across categories). |
 | `val_bad_balance_by_type` | `false` | `true` | per `defect_type`, val bad pool capped at `ceil(min_class * (1 + tolerance))`. Dominant defect class no longer monopolises calibration. |
 | `val_balance_tolerance` | `0.15` | `0.15` | wiggle room around the smallest class. |
+| `min_train_goods` | `50` | `50` | floor on goods left in train when `val_balance=equal`. Caps the total val bad pool so train doesn't shrink below this. |
 
 A test reserve (`ceil(test_ratio * len(class))` per defect type) is
 applied unconditionally so per-defect recall stays measurable on test —
@@ -116,8 +117,32 @@ a bug found during smoke testing where minority Deceuninck classes
    minority classes becomes undefined (0 samples in test). With
    `test_reserve = ceil(0.2 * class_size)` every type retains ≥1
    sample (≥5 for Deceuninck minority classes).
+4. **`min_train_goods` floor** — Adding this knob was forced by an
+   empirical failure. On Real-IAD's `zipper` (≈500 goods, 8 balanced
+   defect types of ≈60 each), rules (1) + (2) interact badly: per-type
+   cap of `ceil(60 × 1.15) = 69`, summed over 8 types, would route
+   ≈400 bads into val. Under `val_balance=equal` that demands ≈400
+   val goods, but only ≈400 goods exist in the train pool to begin
+   with — train collapses to 1–2 samples and PaDiM's per-patch
+   covariance becomes singular, producing NaN scores that crash the
+   F1 calibrator. The fix is a *budget*: `max_val_bads = len(train_good_pool) − min_train_goods`,
+   and per-type quotas are scaled down proportionally when the
+   per-type sum exceeds this budget. Default 50 is the lower bound at
+   which PaDiM/PatchCore/SubspaceAD reliably fit on Colab T4 in our
+   tests; raise it to 100–200 if recall on the calibrator's val set
+   ends up noisy. **The cost of this knob:** when `val_bad_balance_by_type=true`
+   on a small or many-defect-type category, the per-type val cap is
+   *not* ` ceil(min_class × (1 + tolerance))` as advertised — it is
+   that value scaled down to fit the budget. Per-type *balance* is
+   preserved (every type contributes the same number, within
+   rounding); per-type *count* is reduced. This shifts calibration
+   slightly toward smaller-sample F1 curves, which is a known
+   tradeoff documented here so the thesis methodology can disclose it
+   honestly.
 
-### Empirical effect on Deceuninck splits (verified on smoke test)
+### Empirical effect on splits (verified on smoke tests)
+
+**Deceuninck** (224 goods + [21, 27, 23, 23, 388] bads — one dominant class):
 
 | Split | train | val | test | val per type | test per type |
 |---|---:|---:|---:|---|---|
@@ -125,9 +150,23 @@ a bug found during smoke testing where minority Deceuninck classes
 | val_defect v1 (val_ratio of bads → val) | 161g | 18g+49b | 45g+433b | Scratch=35, others 4–5 | natural |
 | **val_defect v2** (equal + per-type, **new**) | 81g | 98g+98b | 45g+384b | Scratch=25, Cleaning=21, Degassing=18, Pigment=18, Black=16 | Scratch=363, Cleaning=6, Black/Degassing/Pigment=5 |
 
-The price for v2 is a smaller train (81 goods vs 161). Acceptable for
-one-class learning on a homogeneous extrusion product; would be
-re-examined on harder categories.
+`min_train_goods=50` doesn't bind here (train_good_pool − val_good = 81 ≥ 50), so the per-type cap is honoured exactly.
+
+**Real-IAD `zipper`-like** (≈500 goods + 8 balanced defect types of ≈60 — many balanced types):
+
+| Split | train | val | test | val per type | Notes |
+|---|---:|---:|---:|---|---|
+| Legacy | 360g | 40g+48b | 100g+432b | ≈6 per type | baseline |
+| val_defect v2 (no budget) | **1g** | 399g+399b | 100g+101b | 50 per type | **CRASH — PaDiM gets train=1, NaN scores** |
+| **val_defect v2** (`min_train_goods=50`) | 56g | 344g+344b | 100g+136b | 43 per type (scaled down from 48) | per-type balance preserved, per-type *count* reduced |
+| val_defect v2 (`min_train_goods=100`) | 104g | 296g+296b | 100g+184b | 37 per type | more conservative; smaller val |
+
+The price for v2 on Deceuninck is a smaller train (81 vs 161 goods); on
+Real-IAD with many balanced defect types the price is a much smaller
+train (≈56 goods instead of ≈360) and a per-type val count *scaled down
+from the advertised cap*. Acceptable for one-class feature-based
+learning on T4; would be re-examined for trained models (STFPM, RD4AD)
+that need more train samples to converge.
 
 ---
 
@@ -271,6 +310,7 @@ this kind of one-class industrial AD task.
 | `format: auto` on Deceuninck | Brittle to folder rename | Pin to `format: deceuninck` (not yet implemented) |
 | Real-IAD limited to camera C1 | Methodology only covers one viewpoint | Frame as "single-viewpoint preview" in thesis |
 | Subspace `mtop1p` aggregation, layer choice | Hyperparameters not tuned | Document as "fixed defaults from the SubspaceAD paper" |
+| `min_train_goods=50` floor scales down per-type val cap on cats with many balanced defect types | Per-type val *count* (e.g. zipper: 43 instead of 48) is reduced; per-type *balance* preserved | Reported in §3 rule 4. Raise the floor and re-run if the calibrator's val F1 looks noisy in those cells |
 
 ---
 

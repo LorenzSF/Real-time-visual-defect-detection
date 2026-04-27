@@ -42,6 +42,10 @@ dataset:
     val_balance: "natural"
     val_bad_balance_by_type: false
     val_balance_tolerance: 0.15
+    # Floor on goods left in train when val_balance="equal". PaDiM needs
+    # enough train samples to estimate a per-patch covariance — fewer
+    # than ~20 produces NaN scores and crashes the calibrator.
+    min_train_goods: 50
     seed: null
 
 preprocessing:

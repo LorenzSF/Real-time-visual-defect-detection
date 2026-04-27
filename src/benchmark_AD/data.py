@@ -537,22 +537,30 @@ def _select_val_bads_balanced(
     tolerance: float,
     rng: random.Random,
     test_ratio: float = 0.2,
+    max_total: Optional[int] = None,
 ) -> Tuple[List[LabeledSample], List[LabeledSample]]:
     """Per-defect-type val sampling capped at ``min_class * (1 + tolerance)``.
 
     Each defect type contributes the same number of bads to val (within the
-    tolerance window), so the calibrator sees every defect category, not just
-    the dominant one. The dominant class is capped; its remaining samples go
-    to test, preserving the natural distribution there.
+    tolerance window), so the calibrator sees every defect category, not
+    just the dominant one. The dominant class is capped; its remaining
+    samples go to test, preserving the natural distribution there.
 
-    To keep per-defect test recall measurable, every class reserves at least
-    ``ceil(test_ratio * len(class))`` samples for test before the val cap is
-    applied. Without the reserve, minority classes (e.g. Deceuninck's
-    21-image *Black spots*) would be fully consumed by val and recall on
-    them in test would be undefined.
+    To keep per-defect test recall measurable, every class reserves at
+    least ``ceil(test_ratio * len(class))`` samples for test before the val
+    cap is applied. Without the reserve, minority classes (e.g. Deceuninck's
+    21-image *Black spots*) would be fully consumed by val.
 
-    When fewer than two defect types are present, returns ``([], bads)`` so
-    the caller can fall back to the natural ``val_ratio`` split.
+    ``max_total`` caps the *sum* across all defect types. Needed because
+    on Real-IAD categories with many balanced defect types the per-type
+    cap can sum to a value larger than the available train pool, leaving
+    one-class fitters (PaDiM in particular) with too few train goods to
+    estimate a covariance — observed empirically as a NaN crash on zipper.
+    When ``sum(per_type_quotas) > max_total`` every quota is scaled down
+    proportionally so per-type balance is preserved.
+
+    Fewer than two defect types → ``([], bads)`` so the caller can fall
+    back to the natural ``val_ratio`` split.
 
     Returns ``(val_bads, remaining_bads_for_test)``.
     """
@@ -564,18 +572,43 @@ def _select_val_bads_balanced(
     min_size = min(sizes)
     cap = max(1, math.ceil(min_size * (1.0 + tolerance)))
 
+    # Per-type quota with class-level test reserve.
+    quotas: Dict[str, int] = {}
+    for dtype, samples in by_type.items():
+        test_reserve = max(1, math.ceil(float(test_ratio) * len(samples)))
+        max_for_val = max(0, len(samples) - test_reserve)
+        quotas[dtype] = min(cap, max_for_val)
+
+    # Global cap: scale every quota proportionally if the sum exceeds the
+    # caller-provided budget. Floor at 1 per non-empty class so each defect
+    # type still contributes — losing all of a class to the global cap
+    # would defeat the per-type balancing.
+    if max_total is not None and max_total >= 0:
+        total = sum(quotas.values())
+        if total > max_total:
+            if max_total == 0:
+                quotas = {k: 0 for k in quotas}
+            else:
+                scale = float(max_total) / float(total)
+                quotas = {
+                    k: max(1, math.floor(v * scale)) if v > 0 else 0
+                    for k, v in quotas.items()
+                }
+                # The floor + min-1 can over-shoot max_total; trim the
+                # largest contributors first.
+                while sum(quotas.values()) > max_total:
+                    biggest = max(quotas, key=quotas.get)
+                    if quotas[biggest] <= 1:
+                        break
+                    quotas[biggest] -= 1
+
     val_bads: List[LabeledSample] = []
     remaining: List[LabeledSample] = []
-    for samples in by_type.values():
+    for dtype, samples in by_type.items():
         groups = _group_by_sample_id(samples)
         rng.shuffle(groups)
         flat = [s for g in groups for s in g]
-        # Always leave at least test_reserve samples in test so per-defect
-        # recall stays measurable. With test_ratio=0.2 and a 21-image class
-        # this is ceil(0.2 * 21) = 5 — the splitter will not eat them.
-        test_reserve = max(1, math.ceil(float(test_ratio) * len(flat)))
-        max_for_val = max(0, len(flat) - test_reserve)
-        n_val = min(cap, max_for_val)
+        n_val = quotas.get(dtype, 0)
         val_bads.extend(flat[:n_val])
         remaining.extend(flat[n_val:])
     return val_bads, remaining
@@ -697,6 +730,10 @@ def apply_dataset_split(
     val_balance = str(split_cfg.get("val_balance", "natural")).lower()
     val_bad_balance_by_type = bool(split_cfg.get("val_bad_balance_by_type", False))
     val_balance_tolerance = float(split_cfg.get("val_balance_tolerance", 0.15))
+    # Floor on how many goods stay in train when val_balance="equal".
+    # PaDiM needs ≥ a few dozen samples to estimate the per-patch
+    # covariance — train_samples=1 produced NaN scores on Real-IAD zipper.
+    min_train_goods = int(split_cfg.get("min_train_goods", 50))
 
     # --- Separate by group ------------------------------------------------
     good, bad, unlabeled = _partition_by_label(samples)
@@ -730,8 +767,16 @@ def apply_dataset_split(
         train_good, test_good = _split_group(good, test_ratio, rng)
         train_unlabeled, test_unlabeled = _split_group(unlabeled, test_ratio, rng)
         if val_bad_balance_by_type:
+            # Under val_balance="equal", val_good == len(val_bad_holdout).
+            # Cap val_bad so train keeps ≥ min_train_goods samples — see
+            # _select_val_bads_balanced.__doc__ for the failure mode.
+            if val_balance == "equal":
+                max_val_bads = max(0, len(train_good) - min_train_goods)
+            else:
+                max_val_bads = None
             val_bad_holdout, test_bad = _select_val_bads_balanced(
-                bad, val_balance_tolerance, rng, test_ratio=test_ratio,
+                bad, val_balance_tolerance, rng,
+                test_ratio=test_ratio, max_total=max_val_bads,
             )
             if not val_bad_holdout:
                 # Fewer than two defect types — fall back to natural slicing.

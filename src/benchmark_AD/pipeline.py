@@ -197,6 +197,16 @@ def _model_cfgs(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _best_f1_threshold(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
     if y_true.size == 0 or len(np.unique(y_true)) < 2:
         return None
+    # Drop NaN/inf scores — PaDiM with too few train goods produces them
+    # and sklearn's precision_recall_curve refuses to ingest non-finite.
+    finite = np.isfinite(y_score)
+    if not finite.all():
+        n_dropped = int((~finite).sum())
+        print(f"[threshold] WARNING: dropping {n_dropped} non-finite val scores before F1 calibration")
+        y_true = y_true[finite]
+        y_score = y_score[finite]
+        if y_true.size == 0 or len(np.unique(y_true)) < 2:
+            return None
     p, r, t = precision_recall_curve(y_true, y_score)
     if t.size == 0:
         return None
@@ -210,6 +220,7 @@ def _quantile_threshold_from_negatives(
     target_fpr: float,
 ) -> Optional[float]:
     negatives = y_score[y_true == 0]
+    negatives = negatives[np.isfinite(negatives)]
     if negatives.size == 0:
         return None
     q = float(np.clip(1.0 - target_fpr, 0.0, 1.0))

@@ -1,7 +1,7 @@
 # PLAN — JobA val_defect: comparison + tables
 
 > Companion to [PLAN.md](PLAN.md). Scope: analyse the JobA "val_defect"
-> re-run (10 categories) against the clean JobA baseline (30 categories),
+> re-run against the clean JobA baseline,
 > and produce the tables/plots needed for the thesis discussion of
 > threshold calibration.
 
