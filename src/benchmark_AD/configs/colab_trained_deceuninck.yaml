@@ -12,7 +12,7 @@
 # Epoch counts target paper-comparable results, not the smoke-test defaults in
 # default.yaml. See the per-model comments for source.
 
-_extends: ../industrial.yaml
+_extends: industrial.yaml
 
 run:
   run_name: "jobB_trained_colab"
