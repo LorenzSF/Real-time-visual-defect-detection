@@ -106,8 +106,8 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     pre_cfg = dict(resolved.get("preprocessing", {}))
     resize_cfg = dict(pre_cfg.get("resize", {}))
     resize_cfg.setdefault("enabled", True)
-    resize_cfg.setdefault("width", 256)
-    resize_cfg.setdefault("height", 256)
+    resize_cfg.setdefault("width", 512)
+    resize_cfg.setdefault("height", 512)
     pre_cfg["resize"] = resize_cfg
 
     normalize_cfg = dict(pre_cfg.get("normalize", {}))

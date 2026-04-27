@@ -1,27 +1,7 @@
 # Job A "val_defect" overlay — same 3 feature-based models as
-# colab_featurebased.yaml, but with thresholding.mode = "val_f1" and the
-# industrial-calibration split rules:
-#   * val_balance: equal              → val ends up 50/50 good/bad so the
-#                                       F1 curve is not biased by val
-#                                       prevalence (which varies wildly
-#                                       across categories).
-#   * val_bad_balance_by_type: true   → per defect_type the val bad pool
-#                                       is capped at ceil(min_class *
-#                                       (1 + tolerance)). The dominant
-#                                       defect class no longer monopolises
-#                                       calibration.
-#   * val_balance_tolerance: 0.15     → ±15% wiggle room around the
-#                                       smallest defect class.
-#   * min_train_goods: 200            → train pool floor. Raised from the
-#                                       default 50 because the v1 rerun
-#                                       (2026-04-26) showed AUROC dropped
-#                                       0.04–0.12 on cats where train
-#                                       collapsed to ~52 goods (PaDiM/
-#                                       PatchCore feature-bank starvation).
-#                                       At 200 the per-type val cap is
-#                                       scaled down further but train
-#                                       stays large enough for the
-#                                       Gaussian/coreset to fit.
+# colab_featurebased.yaml, but with thresholding.mode = "val_f1".
+# Pairs with the data.py patch that routes 10% of anomalies into val,
+# so val_f1 has both classes to fit the operating point on.
 
 _extends: ../default.yaml
 
@@ -43,11 +23,6 @@ dataset:
   path: "/content/work/current"
   extract_dir: "/content/work/current"
   cameras: "C1"
-  split:
-    val_balance: "equal"
-    val_bad_balance_by_type: true
-    val_balance_tolerance: 0.15
-    min_train_goods: 200
 
 benchmark:
   save_umap: false
@@ -58,7 +33,7 @@ benchmark:
         mode: "val_f1"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 8
         pre_trained: true
         backbone: "wide_resnet50_2"
@@ -73,7 +48,7 @@ benchmark:
         mode: "val_f1"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 16
         pre_trained: true
         backbone: "resnet18"
@@ -86,7 +61,7 @@ benchmark:
         target_fpr: 0.01
       subspacead:
         model_ckpt: "facebook/dinov2-with-registers-large"
-        image_size: 256
+        image_size: 512
         batch_size: 4
         pca_ev: 0.99
         pca_dim: null

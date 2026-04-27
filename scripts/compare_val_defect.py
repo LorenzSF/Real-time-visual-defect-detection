@@ -41,8 +41,8 @@ cats_in_vd = sorted({c for c, _ in vd})
 print(f"val_defect categories: {len(cats_in_vd)} -> {', '.join(cats_in_vd)}")
 print(f"paired (cat, model) cells: {len(shared)}\n")
 
-# Detect schema version per cell (v2 has val_balance in split or recall_at_fpr_1pct on entry).
-def _is_v2(entry, run_split):
+# Detect whether a cell came from the legacy balanced-val experiment.
+def _is_balanced_val_variant(entry, run_split):
     return ("recall_at_fpr_1pct" in entry) or ("val_balance" in run_split)
 
 
@@ -61,7 +61,8 @@ print("\t".join(header))
 per_model_deltas = {m: {"dAUROC": [], "dAUPR": [], "dF1": [], "dPrec": [], "dRec": [],
                         "thr_ratio": [], "valF1": [], "valRec": []} for m in MODELS}
 
-# Find run-level split metadata for each vd cell to detect v2.
+# Find run-level split metadata for each vd cell to detect the legacy
+# balanced-val variant when mixed historical outputs are present.
 def _split_for_vd(cat):
     for d in ROOT.glob(f"jobA_val_defect_{cat}_*"):
         fp = d / "benchmark_summary.json"
@@ -71,14 +72,14 @@ def _split_for_vd(cat):
     return {}
 
 
-v2_cells = 0
+balanced_cells = 0
 for cat, model in shared:
     c = clean[(cat, model)]
     v = vd[(cat, model)]
-    is_v2 = _is_v2(v, _split_for_vd(cat))
-    if is_v2:
-        v2_cells += 1
-    schema = "v2" if is_v2 else "v1"
+    is_balanced = _is_balanced_val_variant(v, _split_for_vd(cat))
+    if is_balanced:
+        balanced_cells += 1
+    schema = "balanced" if is_balanced else "v1"
 
     auroc_c, auroc_v = c.get("auroc", 0), v.get("auroc", 0)
     aupr_c, aupr_v = c.get("aupr", 0), v.get("aupr", 0)
@@ -109,7 +110,10 @@ for cat, model in shared:
     ]
     print("\t".join(row))
 
-print(f"\nschema mix: v2 cells = {v2_cells} / {len(shared)} (rest are v1: val_f1 only)")
+print(
+    f"\nschema mix: balanced-val legacy cells = {balanced_cells} / {len(shared)} "
+    "(rest are v1: patched splitter + val_f1 only)"
+)
 
 print("\n=== PER-MODEL SUMMARY (mean delta over paired cells) ===")
 print("model\tn\tdAUROC\tdAUPR\tdF1\tdPrec\tdRec\tthr_ratio\tvalRec\tvalF1")
@@ -157,8 +161,8 @@ print(f"|median dAUROC| < 0.01 ?  median = {median(all_dauroc):+.4f}  -> {'PASS'
 print(f"|median dAUPR|  < 0.01 ?  median = {median(all_daupr):+.4f}  -> {'PASS' if abs(median(all_daupr)) < 0.01 else 'CHECK'}")
 print(f"val_recall == 0 cells:    {val_recall_zero}  -> {'PASS' if val_recall_zero == 0 else 'CHECK'}")
 
-# Recall@FPR breakout for v2 cells.
-print("\n=== INDUSTRIAL METRICS (v2 cells only: recall_at_fpr_1pct / 5pct, macro_recall) ===")
+# Recall@FPR breakout for cells that include the industrial metrics fields.
+print("\n=== INDUSTRIAL METRICS (cells with recall_at_fpr_* fields) ===")
 print("category\tmodel\tR@FPR1\tR@FPR5\tmacro_rec\tweighted_rec")
 for cat, model in shared:
     v = vd[(cat, model)]
@@ -170,8 +174,8 @@ for cat, model in shared:
           f"\t{v.get('macro_recall', 0):.3f}"
           f"\t{v.get('weighted_recall', 0):.3f}")
 
-# Train shrink check (v2 with val_balance=equal can collapse train).
-print("\n=== TRAIN/VAL/TEST SIZES (v2 cells) ===")
+# Train / val / test sizes for cells that include the industrial metrics fields.
+print("\n=== TRAIN/VAL/TEST SIZES (cells with recall_at_fpr_* fields) ===")
 print("category\tmodel\ttrain\tval\ttest")
 for cat, model in shared:
     v = vd[(cat, model)]

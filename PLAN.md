@@ -85,11 +85,11 @@ These apply to every file touched or created in this project:
 - Fix any model-loading or evaluation bugs found during the run.
 - Launch on GPU cluster:
   - **Job A:** Clean benchmark, standard dataset (Real-IAD), all models.
-  - **Job A val_defect (rerun):** Same models with `val_f1` thresholding + balanced val
-    (50/50 good/bad, per-defect-type cap). Drives the headline F1/Recall numbers — see
+  - **Job A val_defect (rerun):** Same models with `val_f1` thresholding and the patched
+    splitter that routes 10% of anomalies into val. Drives the headline F1/Recall numbers — see
     [METHOD.md §3](METHOD.md#3-train--val--test-composition-is-the-second-dominant-axis).
   - **Job B:** Clean benchmark, real industrial dataset (Deceuninck), all models.
-  - **Job B val_defect (new):** Same models with `val_f1` + balanced val. Use
+  - **Job B val_defect (new):** Same models with `val_f1` and the patched splitter. Use
     [scripts/run_jobB_val_defect_colab.sh](scripts/run_jobB_val_defect_colab.sh).
 - After results: identify the **best-performing model** by inspecting `benchmark_summary.json` manually → this name is then passed to `runtime_main.py --model <name>` for streaming. Never auto-select.
 

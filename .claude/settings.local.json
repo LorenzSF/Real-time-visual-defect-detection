@@ -19,7 +19,8 @@
       "Bash(chmod +x \"/c/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection/scripts/run_jobB_val_defect_colab.sh\")",
       "Bash(PYTHONPATH=src python -m pytest tests/ -q)",
       "Bash(python scripts/analyze_runs.py --prefix jobA_val_defect_)",
-      "Bash(python scripts/compare_val_defect.py)"
+      "Bash(python scripts/compare_val_defect.py)",
+      "Bash(python scripts/split_simulation.py)"
     ]
   }
 }

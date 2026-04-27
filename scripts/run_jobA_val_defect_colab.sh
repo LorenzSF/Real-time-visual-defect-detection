@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Job A "val_defect" driver: runs the patched splitter + val_f1 thresholding
-# on the 10 Real-IAD categories with the highest mean AUPR from JobA clean.
-# Selection rationale: highest-AUPR categories are where the val_quantile
-# threshold most aggressively suppressed recall — biggest expected F1 lift.
+# on the pending Real-IAD categories relative to the 30-category dataset.
+# The categories already present under data/outputs/jobA_val_defect_V1 were
+# removed from this loop so the next Colab batch covers only the remaining
+# v1 cells.
 #
 # Resumable: a `<category>.done` marker under RESULTS_DIR skips the run.
 #
@@ -22,16 +23,29 @@ REPO_DIR="${REPO_DIR:-/content/Real-time-visual-defect-detection}"
 CONFIG="${CONFIG:-${REPO_DIR}/src/benchmark_AD/configs/colab_featurebased_val_defect.yaml}"
 
 CATEGORIES=(
-  rolled_strip_base
-  zipper
-  sim_card_set
-  transistor1
-  switch
-  toothbrush
-  terminalblock
-  usb_adaptor
+  audiojack
+  bottle_cap
+  button_battery
+  end_cap
   pcb
   eraser
+  fire_hood
+  mint
+  mounts
+  phone_battery
+  plastic_nut
+  plastic_plug
+  porcelain_doll
+  regulator
+  tape
+  toy
+  toy_brick
+  u_block
+  usb
+  usb_adaptor
+  vcpill
+  wooden_beads
+  woodstick
 )
 
 mkdir -p "${RESULTS_DIR}" "${WORK_DIR}"

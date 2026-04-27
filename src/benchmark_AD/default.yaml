@@ -51,8 +51,8 @@ dataset:
 preprocessing:
   resize:
     enabled: true
-    width: 256
-    height: 256
+    width: 512
+    height: 512
   normalize:
     enabled: true
     mode: "0_1"
@@ -74,7 +74,7 @@ model:
     target_fpr: 0.01
 
   rd4ad:
-    image_size: 256
+    image_size: 512
     batch_size: 16
     backbone: "wide_resnet50_2"
     layers: ["layer1", "layer2", "layer3"]
@@ -83,7 +83,7 @@ model:
     anomaly_map_mode: "multiply"
 
   anomalib:
-    image_size: 256
+    image_size: 512
     batch_size: 8
     pre_trained: true
     backbone: "wide_resnet50_2"
@@ -112,7 +112,7 @@ model:
 
   subspacead:
     model_ckpt: "facebook/dinov2-with-registers-large"
-    image_size: 256
+    image_size: 512
     batch_size: 4
     pca_ev: 0.99
     pca_dim: null

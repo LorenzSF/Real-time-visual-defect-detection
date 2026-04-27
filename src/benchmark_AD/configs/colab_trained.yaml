@@ -41,7 +41,7 @@ model:
 
   # Shared anomalib block (used by STFPM/CSFlow/DRAEM image-size + batch base).
   anomalib:
-    image_size: 256
+    image_size: 512
     batch_size: 8
     pre_trained: true
     backbone: "wide_resnet50_2"
@@ -72,7 +72,7 @@ model:
 
   # RD4AD (Deng & Li 2022). Paper trains 200 epochs with Adam(lr=0.005, betas=(0.5, 0.999)).
   rd4ad:
-    image_size: 256
+    image_size: 512
     batch_size: 16
     backbone: "wide_resnet50_2"
     layers: ["layer1", "layer2", "layer3"]

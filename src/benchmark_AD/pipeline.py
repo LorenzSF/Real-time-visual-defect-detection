@@ -470,8 +470,8 @@ def _run_inference(
     corruption_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     do_resize = bool(pre_cfg.get("resize", {}).get("enabled", False))
-    w = int(pre_cfg.get("resize", {}).get("width", 256))
-    h = int(pre_cfg.get("resize", {}).get("height", 256))
+    w = int(pre_cfg.get("resize", {}).get("width", 512))
+    h = int(pre_cfg.get("resize", {}).get("height", 512))
 
     rows: List[Dict[str, Any]] = []
     latencies_ms: List[float] = []

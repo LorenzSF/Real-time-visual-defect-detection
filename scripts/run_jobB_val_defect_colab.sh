@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Job B "val_defect" driver: Deceuninck dataset with the patched splitter
-# (val 50/50 + per-defect-type balanced bads) and val_f1 thresholding.
+# (10% of anomalies routed into val) and val_f1 thresholding.
 #
 # Single dataset (no per-category loop). Resumable via jobB_val_defect.done
 # under RESULTS_DIR — delete the marker to rerun.
@@ -57,7 +57,7 @@ cp -r "${DATASET_DIR}/defects" "${local_dataset}/defects"
 cd "${REPO_DIR}"
 export PYTHONPATH="${REPO_DIR}/src:${PYTHONPATH:-}"
 
-echo "[jobB_val_defect] running pipeline (3 models, val_f1 + balanced val)..."
+echo "[jobB_val_defect] running pipeline (3 models, val_f1)..."
 python main.py \
   --config "${CONFIG}" \
   --dataset-path "${local_dataset}" \

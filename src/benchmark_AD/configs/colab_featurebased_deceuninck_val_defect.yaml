@@ -1,19 +1,7 @@
 # Job B "val_defect" overlay — same 3 feature-based models as
-# colab_featurebased_deceuninck.yaml, but with thresholding.mode = "val_f1"
-# and the industrial-calibration split rules:
-#   * val_balance: equal              → val ends up 50/50 good/bad so the
-#                                       F1 curve is unbiased by Deceuninck's
-#                                       91% bad-heavy test prevalence.
-#   * val_bad_balance_by_type: true   → per defect_type (Black spots,
-#                                       Cleaning felt, Degassing, Pigment
-#                                       spill, Scratch in extrusion
-#                                       direction) the val bad pool is
-#                                       capped at ceil(min_class * (1 +
-#                                       tolerance)). With min_class = 21
-#                                       (Black spots) and tolerance 0.15,
-#                                       cap ≈ 25 per type. Scratches no
-#                                       longer monopolise calibration.
-#   * val_balance_tolerance: 0.15     → ±15% wiggle room.
+# colab_featurebased_deceuninck.yaml, but with thresholding.mode = "val_f1".
+# Pairs with the data.py patch that routes 10% of anomalies into val,
+# so val_f1 has both classes to fit the operating point on.
 
 _extends: ../default.yaml
 
@@ -36,10 +24,6 @@ dataset:
   # and uses each subfolder name as defect_type.
   path: "/content/work/current"
   extract_dir: "/content/work/current"
-  split:
-    val_balance: "equal"
-    val_bad_balance_by_type: true
-    val_balance_tolerance: 0.15
 
 benchmark:
   save_umap: false
@@ -50,7 +34,7 @@ benchmark:
         mode: "val_f1"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 8
         pre_trained: true
         backbone: "wide_resnet50_2"
@@ -65,7 +49,7 @@ benchmark:
         mode: "val_f1"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 16
         pre_trained: true
         backbone: "resnet18"
@@ -78,7 +62,7 @@ benchmark:
         target_fpr: 0.01
       subspacead:
         model_ckpt: "facebook/dinov2-with-registers-large"
-        image_size: 256
+        image_size: 512
         batch_size: 4
         pca_ev: 0.99
         pca_dim: null

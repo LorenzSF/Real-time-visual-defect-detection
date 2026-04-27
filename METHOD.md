@@ -3,8 +3,8 @@
 > Living document with **partial conclusions** drawn from the JobA / JobB
 > analyses. Numbers below are from the 30-cat clean JobA run, the 7-cat
 > val_defect rerun, and the single JobB run. Everything is stamped *as of*
-> 2026-04-26 and will be updated when the new (val_balance=equal +
-> per-defect-type) reruns finish.
+> 2026-04-27 and reflects the current val_defect workflow:
+> patched splitter + `val_f1`, without balanced-val overrides.
 >
 > Companion to [PLAN.md](PLAN.md) (project-level scope) and
 > [PLAN job A_analize val_defect.md](PLAN%20job%20A_analize%20val_defect.md)
@@ -76,7 +76,7 @@ entirely from a better operating point. PaDiM was the most miscalibrated
 ### Decision for the thesis
 
 The `val_quantile` numbers are kept only for completeness; the headline
-metrics use `val_f1` plus the val-composition rules in §3. The
+metrics use `val_f1` with the patched splitter in §3. The
 methodology section should explicitly state that any reported F1 / Recall
 without a documented calibration procedure is meaningless on industrial
 AD datasets.
@@ -85,88 +85,43 @@ AD datasets.
 
 ## 3. Train / val / test composition is the *second* dominant axis
 
-Once the calibrator works, the next sensitivity is the **composition of
-each split**. The pipeline now exposes four knobs in
-[default.yaml#dataset.split](src/benchmark_AD/default.yaml):
+Once the calibrator works, the next sensitivity is whether the
+validation split contains **both classes**. The current val_defect
+workflow keeps the one-class training setup intact and applies only a
+minimal splitter patch in
+[data.py:apply_dataset_split](src/benchmark_AD/data.py):
 
-| Knob | Default | val_defect overlay | Effect |
-|---|---|---|---|
-| `val_balance` | `"natural"` | `"equal"` | when "equal", val ends up 50/50 good/bad. F1 curve no longer biased by val prevalence (which varies wildly across categories). |
-| `val_bad_balance_by_type` | `false` | `true` | per `defect_type`, val bad pool capped at `ceil(min_class * (1 + tolerance))`. Dominant defect class no longer monopolises calibration. |
-| `val_balance_tolerance` | `0.15` | `0.15` | wiggle room around the smallest class. |
-| `min_train_goods` | `50` | `50` | floor on goods left in train when `val_balance=equal`. Caps the total val bad pool so train doesn't shrink below this. |
+- **Clean baseline**: goods are split into train / val / test by ratio, and
+  all anomalies go to test.
+- **val_defect workflow**: the goods split stays the same, but 10% of the
+  anomaly pool is routed into val so `val_f1` has positives to calibrate on.
+- **Per-defect test reserve**: `ceil(test_ratio * len(class))` is still
+  enforced per defect type so minority classes remain measurable on test.
 
-A test reserve (`ceil(test_ratio * len(class))` per defect type) is
-applied unconditionally so per-defect recall stays measurable on test —
-a bug found during smoke testing where minority Deceuninck classes
-(Black spots = 21 images) would otherwise be fully consumed by val.
+### Why this rule set matters
 
-### Why each rule matters
+1. **`val_f1` needs positives in val** - without them the calibrator falls
+   back to `val_quantile`, which recreates the over-conservative operating
+   point seen in the first clean runs.
+2. **Model fitting is unchanged** - train stays good-only, so any metric
+   shift comes from threshold calibration rather than from changing the
+   one-class training regime.
+3. **Minority defect classes stay evaluable** - the per-type test reserve
+   prevents small JobB classes from being consumed by val.
 
-1. **`val_balance: equal`** — F1 is prevalence-sensitive. With val ≈ 73%
-   bads (JobB pre-patch) the F1 maximiser tolerates large FPR; with val
-   ≈ 18% bads (some JobA cats) it picks an over-conservative threshold.
-   A 50/50 val makes the picked threshold comparable across cats and
-   across jobs.
-2. **`val_bad_balance_by_type: true`** — On Deceuninck, *Scratch in
-   extrusion direction* is 80% of all bads (388/482). Without per-type
-   balancing the calibrator fits the operating point on scratches and
-   the four other defect types are accidentally calibrated. With the
-   cap each type contributes ~equally to the F1 curve.
-3. **Test reserve per type** — Without it, the per-defect recall on
-   minority classes becomes undefined (0 samples in test). With
-   `test_reserve = ceil(0.2 * class_size)` every type retains ≥1
-   sample (≥5 for Deceuninck minority classes).
-4. **`min_train_goods` floor** — Adding this knob was forced by an
-   empirical failure. On Real-IAD's `zipper` (≈500 goods, 8 balanced
-   defect types of ≈60 each), rules (1) + (2) interact badly: per-type
-   cap of `ceil(60 × 1.15) = 69`, summed over 8 types, would route
-   ≈400 bads into val. Under `val_balance=equal` that demands ≈400
-   val goods, but only ≈400 goods exist in the train pool to begin
-   with — train collapses to 1–2 samples and PaDiM's per-patch
-   covariance becomes singular, producing NaN scores that crash the
-   F1 calibrator. The fix is a *budget*: `max_val_bads = len(train_good_pool) − min_train_goods`,
-   and per-type quotas are scaled down proportionally when the
-   per-type sum exceeds this budget. Default 50 is the lower bound at
-   which PaDiM/PatchCore/SubspaceAD reliably fit on Colab T4 in our
-   tests; raise it to 100–200 if recall on the calibrator's val set
-   ends up noisy. **The cost of this knob:** when `val_bad_balance_by_type=true`
-   on a small or many-defect-type category, the per-type val cap is
-   *not* ` ceil(min_class × (1 + tolerance))` as advertised — it is
-   that value scaled down to fit the budget. Per-type *balance* is
-   preserved (every type contributes the same number, within
-   rounding); per-type *count* is reduced. This shifts calibration
-   slightly toward smaller-sample F1 curves, which is a known
-   tradeoff documented here so the thesis methodology can disclose it
-   honestly.
+### Empirical effect on splits
 
-### Empirical effect on splits (verified on smoke tests)
+**Deceuninck** (224 goods + [21, 27, 23, 23, 388] bads):
 
-**Deceuninck** (224 goods + [21, 27, 23, 23, 388] bads — one dominant class):
+| Split | train | val | test |
+|---|---:|---:|---:|
+| Legacy (`val_quantile`) | 161g | 18g+0b | 45g+482b |
+| Current val_defect (`val_f1`) | 161g | 18g+49b | 45g+433b |
 
-| Split | train | val | test | val per type | test per type |
-|---|---:|---:|---:|---|---|
-| Legacy (val_quantile) | 161g | 18g+0b | 45g+482b | n/a | natural |
-| val_defect v1 (val_ratio of bads → val) | 161g | 18g+49b | 45g+433b | Scratch=35, others 4–5 | natural |
-| **val_defect v2** (equal + per-type, **new**) | 81g | 98g+98b | 45g+384b | Scratch=25, Cleaning=21, Degassing=18, Pigment=18, Black=16 | Scratch=363, Cleaning=6, Black/Degassing/Pigment=5 |
-
-`min_train_goods=50` doesn't bind here (train_good_pool − val_good = 81 ≥ 50), so the per-type cap is honoured exactly.
-
-**Real-IAD `zipper`-like** (≈500 goods + 8 balanced defect types of ≈60 — many balanced types):
-
-| Split | train | val | test | val per type | Notes |
-|---|---:|---:|---:|---|---|
-| Legacy | 360g | 40g+48b | 100g+432b | ≈6 per type | baseline |
-| val_defect v2 (no budget) | **1g** | 399g+399b | 100g+101b | 50 per type | **CRASH — PaDiM gets train=1, NaN scores** |
-| **val_defect v2** (`min_train_goods=50`) | 56g | 344g+344b | 100g+136b | 43 per type (scaled down from 48) | per-type balance preserved, per-type *count* reduced |
-| val_defect v2 (`min_train_goods=100`) | 104g | 296g+296b | 100g+184b | 37 per type | more conservative; smaller val |
-
-The price for v2 on Deceuninck is a smaller train (81 vs 161 goods); on
-Real-IAD with many balanced defect types the price is a much smaller
-train (≈56 goods instead of ≈360) and a per-type val count *scaled down
-from the advertised cap*. Acceptable for one-class feature-based
-learning on T4; would be re-examined for trained models (STFPM, RD4AD)
-that need more train samples to converge.
+**Real-IAD categories** keep the same number of training goods as the clean
+baseline; only the anomaly side changes. In practice, val gains 10% of the
+bad pool and test keeps the remaining 90%, which is enough to calibrate
+`val_f1` without collapsing the one-class train split.
 
 ---
 
@@ -247,20 +202,19 @@ Per-defect recall belongs in an appendix table — too wide for the body.
 All overlays inherit from [default.yaml](src/benchmark_AD/default.yaml).
 Differences highlighted.
 
-| Overlay | Dataset | Format | Cameras | Threshold mode | val_balance | val_bad_balance_by_type |
-|---|---|---|---|---|---|---|
-| [colab_featurebased.yaml](src/benchmark_AD/configs/colab_featurebased.yaml) | Real-IAD | real_iad | C1 | val_quantile (target_fpr 0.01) | natural | false |
-| [colab_featurebased_val_defect.yaml](src/benchmark_AD/configs/colab_featurebased_val_defect.yaml) | Real-IAD | real_iad | C1 | val_f1 | **equal** | **true** |
-| [colab_featurebased_deceuninck.yaml](src/benchmark_AD/configs/colab_featurebased_deceuninck.yaml) | Deceuninck | auto | n/a | val_quantile | natural | false |
-| [colab_featurebased_deceuninck_val_defect.yaml](src/benchmark_AD/configs/colab_featurebased_deceuninck_val_defect.yaml) | Deceuninck | auto | n/a | val_f1 | **equal** | **true** |
+| Overlay | Dataset | Format | Cameras | Threshold mode | Val split |
+|---|---|---|---|---|---|
+| [colab_featurebased.yaml](src/benchmark_AD/configs/colab_featurebased.yaml) | Real-IAD | real_iad | C1 | val_quantile (target_fpr 0.01) | goods-only val |
+| [colab_featurebased_val_defect.yaml](src/benchmark_AD/configs/colab_featurebased_val_defect.yaml) | Real-IAD | real_iad | C1 | val_f1 | goods-only val + 10% anomalies |
+| [colab_featurebased_deceuninck.yaml](src/benchmark_AD/configs/colab_featurebased_deceuninck.yaml) | Deceuninck | auto | n/a | val_quantile | goods-only val |
+| [colab_featurebased_deceuninck_val_defect.yaml](src/benchmark_AD/configs/colab_featurebased_deceuninck_val_defect.yaml) | Deceuninck | auto | n/a | val_f1 | goods-only val + 10% anomalies |
 
 ---
 
 ## 7. Preliminary model conclusions
 
-**These are not the final thesis numbers** — they predate the
-val_balance=equal + per-type rerun. Update this section once those
-numbers land.
+**These are not the final thesis numbers** — refresh this section after the
+next full val_defect rerun lands for both datasets.
 
 ### From clean JobA (30 categories × 3 models)
 
@@ -269,7 +223,7 @@ numbers land.
 - F1/Recall numbers are not trustworthy under `val_quantile` — over-strict
   (recall 0.36 mean, 0.99 precision). See §2.
 
-### From JobA val_defect (7 of 10 categories, val_f1, no val_balance)
+### From JobA val_defect (7 of 10 categories, patched splitter + val_f1)
 
 - Calibration switch alone gives ΔF1 = +0.10 / +0.30 / +0.09 (PatchCore /
   PaDiM / SubspaceAD), ΔRecall = +0.17 / +0.44 / +0.15. AUROC unchanged.
@@ -310,29 +264,28 @@ this kind of one-class industrial AD task.
 | `format: auto` on Deceuninck | Brittle to folder rename | Pin to `format: deceuninck` (not yet implemented) |
 | Real-IAD limited to camera C1 | Methodology only covers one viewpoint | Frame as "single-viewpoint preview" in thesis |
 | Subspace `mtop1p` aggregation, layer choice | Hyperparameters not tuned | Document as "fixed defaults from the SubspaceAD paper" |
-| `min_train_goods=50` floor scales down per-type val cap on cats with many balanced defect types | Per-type val *count* (e.g. zipper: 43 instead of 48) is reduced; per-type *balance* preserved | Reported in §3 rule 4. Raise the floor and re-run if the calibrator's val F1 looks noisy in those cells |
 
 ---
 
-## 9. What changes in JobA/B re-runs (after 2026-04-26)
+## 9. Current JobA/B val_defect run settings
 
-The next batch of runs (val_defect v2) uses:
+The active val_defect workflow uses:
 
-- `thresholding.mode: val_f1` (carried over from v1).
-- `val_balance: equal`, `val_bad_balance_by_type: true`, `val_balance_tolerance: 0.15` (**new**).
-- New per-summary fields: `recall_at_fpr_1pct`, `recall_at_fpr_5pct`,
-  `macro_recall`, `weighted_recall`, `per_defect_recall`,
-  `per_defect_support`.
+- `thresholding.mode: val_f1`.
+- The patched splitter that routes 10% of anomaly images into val while
+  keeping train good-only.
+- The same per-summary fields as the clean runs, plus the industrial
+  metrics already added to `benchmark_summary.json`:
+  `recall_at_fpr_1pct`, `recall_at_fpr_5pct`, `macro_recall`,
+  `weighted_recall`, `per_defect_recall`, `per_defect_support`.
 
 Expected behaviour:
 
-- AUROC / AUPR unchanged (model and ranking are unchanged).
-- Threshold per cell shifts slightly (calibrator now sees a balanced val).
-- Macro recall vs weighted recall gap exposes uneven per-class detection
-  on categories with imbalanced defect classes.
-- On JobB specifically, the calibrator's permissiveness should drop
-  (val no longer 18 clean images), so FPR should fall. PaDiM's lead on
-  the FPR axis may shrink as PatchCore/SubspaceAD catch up.
+- AUROC / AUPR stay essentially unchanged because ranking is unchanged.
+- Thresholds shift because val now contains both classes.
+- F1 / Recall rise when the clean baseline was over-conservative.
+- Macro recall vs weighted recall still exposes uneven per-class detection
+  on imbalanced categories.
 
 ---
 

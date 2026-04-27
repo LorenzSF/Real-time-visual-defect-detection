@@ -36,7 +36,7 @@ benchmark:
         mode: "val_quantile"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 8
         pre_trained: true
         backbone: "wide_resnet50_2"
@@ -51,7 +51,7 @@ benchmark:
         mode: "val_quantile"
         target_fpr: 0.01
       anomalib:
-        image_size: 256
+        image_size: 512
         batch_size: 16
         pre_trained: true
         backbone: "resnet18"
@@ -64,7 +64,7 @@ benchmark:
         target_fpr: 0.01
       subspacead:
         model_ckpt: "facebook/dinov2-with-registers-large"
-        image_size: 256
+        image_size: 512
         batch_size: 4
         pca_ev: 0.99
         pca_dim: null

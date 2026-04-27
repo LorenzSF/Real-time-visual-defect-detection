@@ -701,7 +701,7 @@ class SubspaceADModel(BaseModel):
         threshold: float = 0.5,
         device: str = "cpu",
         model_ckpt: str = "facebook/dinov2-with-registers-large",
-        image_size: int = 256,
+        image_size: int = 512,
         batch_size: int = 4,
         pca_ev: float = 0.99,
         pca_dim: Optional[int] = None,
@@ -846,7 +846,7 @@ def _build_rd4ad(model_cfg: Dict[str, Any], runtime_cfg: Dict[str, Any]) -> Base
     return AnomalibRd4adModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(rd_cfg.get("image_size", an_cfg.get("image_size", 256))),
+        image_size=int(rd_cfg.get("image_size", an_cfg.get("image_size", 512))),
         batch_size=int(rd_cfg.get("batch_size", an_cfg.get("batch_size", 16))),
         backbone=str(rd_cfg.get("backbone", an_cfg.get("backbone", "wide_resnet50_2"))),
         layers=rd_cfg.get("layers", an_cfg.get("layers", ["layer1", "layer2", "layer3"])),
@@ -865,7 +865,7 @@ def _build_anomalib_patchcore(
     return AnomalibPatchcoreModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(an_cfg.get("image_size", 256)),
+        image_size=int(an_cfg.get("image_size", 512)),
         batch_size=int(an_cfg.get("batch_size", 8)),
         pre_trained=bool(an_cfg.get("pre_trained", True)),
         backbone=str(an_cfg.get("backbone", "wide_resnet50_2")),
@@ -883,7 +883,7 @@ def _build_anomalib_padim(
     return AnomalibPadimModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(an_cfg.get("image_size", 256)),
+        image_size=int(an_cfg.get("image_size", 512)),
         batch_size=int(an_cfg.get("batch_size", 8)),
         pre_trained=bool(an_cfg.get("pre_trained", True)),
         backbone=str(an_cfg.get("backbone", "resnet18")),
@@ -901,7 +901,7 @@ def _build_anomalib_stfpm(
     return AnomalibStfpmModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(an_cfg.get("image_size", 256)),
+        image_size=int(an_cfg.get("image_size", 512)),
         batch_size=int(an_cfg.get("batch_size", 8)),
         backbone=str(st_cfg.get("backbone", an_cfg.get("backbone", "resnet18"))),
         layers=st_cfg.get("layers", an_cfg.get("layers", ["layer1", "layer2", "layer3"])),
@@ -919,7 +919,7 @@ def _build_anomalib_csflow(
     return AnomalibCsflowModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(an_cfg.get("image_size", 256)),
+        image_size=int(an_cfg.get("image_size", 512)),
         batch_size=int(an_cfg.get("batch_size", 8)),
         epochs=int(cs_cfg.get("epochs", 1)),
         learning_rate=float(cs_cfg.get("learning_rate", 2e-4)),
@@ -947,7 +947,7 @@ def _build_anomalib_draem(
     return AnomalibDraemModel(
         threshold=float(model_cfg.get("threshold", 0.5)),
         device=str(runtime_cfg.get("resolved_device", "cpu")),
-        image_size=int(an_cfg.get("image_size", 256)),
+        image_size=int(an_cfg.get("image_size", 512)),
         batch_size=int(an_cfg.get("batch_size", 8)),
         epochs=int(dr_cfg.get("epochs", 1)),
         learning_rate=float(dr_cfg.get("learning_rate", 1e-4)),
@@ -964,7 +964,7 @@ def _build_subspacead(model_cfg: Dict[str, Any], runtime_cfg: Dict[str, Any]) ->
         model_ckpt=str(
             sub_cfg.get("model_ckpt", "facebook/dinov2-with-registers-large")
         ),
-        image_size=int(sub_cfg.get("image_size", 256)),
+        image_size=int(sub_cfg.get("image_size", 512)),
         batch_size=int(sub_cfg.get("batch_size", 4)),
         pca_ev=float(sub_cfg.get("pca_ev", 0.99)),
         pca_dim=int(sub_cfg["pca_dim"]) if sub_cfg.get("pca_dim") is not None else None,
