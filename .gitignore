@@ -36,3 +36,9 @@ docs/
 memory/
 METHOD*
 *PLAN*
+
+# Execution helpers kept local
+notebooks/*colab*.ipynb
+scripts/*colab*.sh
+scripts/*wice*.sh
+scripts/run_jobC.sh
