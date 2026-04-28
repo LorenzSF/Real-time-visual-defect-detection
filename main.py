@@ -65,8 +65,25 @@ def _base_model_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _apply_single_model(cfg: Dict[str, Any], model_name: str) -> None:
-    """Pin the pipeline to a single model, preserving its per-kind sub-config."""
-    base = _base_model_cfg(cfg)
+    """Pin the pipeline to a single model, preserving its per-kind sub-config.
+
+    When ``benchmark.models[]`` contains an entry matching ``model_name``,
+    that entry's full config (e.g. PaDiM-specific ``anomalib`` overrides) is
+    used as the base — otherwise the global ``cfg['model']`` block is used.
+    Without this, --model would silently drop per-model YAML overrides and
+    e.g. PaDiM would inherit PatchCore's wide_resnet50_2 backbone and OOM
+    on the covariance step.
+    """
+    base: Optional[Dict[str, Any]] = None
+    bench_models = cfg.get("benchmark", {}).get("models")
+    if isinstance(bench_models, list):
+        for m in bench_models:
+            if isinstance(m, dict) and m.get("name") == model_name:
+                base = {k: v for k, v in m.items() if k != "name"}
+                break
+    if base is None:
+        base = _base_model_cfg(cfg)
+
     entry = {**base, "name": model_name}
     cfg["model"] = dict(entry)
     bench = dict(cfg.get("benchmark", {})) if isinstance(cfg.get("benchmark"), dict) else {}
