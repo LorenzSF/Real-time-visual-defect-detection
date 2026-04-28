@@ -100,7 +100,7 @@ These apply to every file touched or created in this project:
 - ✅ Pipeline runs end-to-end on all supported models.
 - ✅ `default.yaml` now uses `val_f1`. All Job A/B configs inherit it; the `*_val_defect.yaml` overlays are kept as historical aliases.
 - 🟡 **JobA val_f1 — finish the remaining 11 cats** (porcelain_doll, regulator, tape, toy, toy_brick, u_block, usb, usb_adaptor, vcpill, wooden_beads, woodstick). Reuse [scripts/run_jobA_val_defect_colab.sh](scripts/run_jobA_val_defect_colab.sh) (or its successor) and append outputs into `data/outputs/jobA_val_defect_V1/`.
-- 🟡 **JobA trained — wICE re-run.** `git pull` on the HPC clone (so `colab_trained.yaml` picks up `val_f1` and `image_size: 512` from `default.yaml`), then re-launch `csflow audiojack` and extend to the 30 categories × 4 trained models matrix described in [HPC_KU_LEUVEN_RUNBOOK.md §6–7](docs/HPC_KU_LEUVEN_RUNBOOK.md).
+- 🟡 **JobA trained — wICE re-run.** `git pull` on the HPC clone (so `colab_trained.yaml` picks up `val_f1` and `image_size: 512` from `default.yaml`), extend to the 30 categories × 4 trained models matrix described in [HPC_KU_LEUVEN_RUNBOOK.md §6–7](docs/HPC_KU_LEUVEN_RUNBOOK.md).
 - 🟡 **JobB Deceuninck val_f1.** Re-run via [scripts/run_jobB_val_defect_colab.sh](scripts/run_jobB_val_defect_colab.sh); confirm the F1/Recall lift on Deceuninck mirrors the Real-IAD result (or document the difference if not).
 - 🟡 **Re-run regression cell.** `plastic_plug × PaDiM` showed ΔAUROC = −0.096 in the val_defect rerun; re-launch with a fresh seed to confirm whether the drop is noise or real before publishing the table.
 - After results: regenerate Tables A–D via [scripts/compare_clean_vd.py](scripts/compare_clean_vd.py) and identify the **best-performing model** by inspecting the consolidated `benchmark_summary.json` set manually → this name is then passed to `runtime_main.py --model <name>` for streaming. Never auto-select.
@@ -166,15 +166,8 @@ Dashboard must show (in a single screen, readable by a factory operator):
 
 **Recommended stack:** Streamlit (simple, already available). Use `st.empty()` placeholders and `time.sleep()` loop for live updates. If Streamlit is not suitable, use Plotly Dash with a background thread.
 
-#### 2.2 — Streaming with corruptions
-**Goal:** The streaming loop can optionally apply corruptions frame-by-frame, reusing the same registry from Block 2.
 
-- Add `--corruption` and `--severity` flags to `runtime_main.py`.
-- In `app.py`, if corruption is configured: apply `get_corruption(name, severity)` to each frame before inference.
-- This enables direct comparison: dashboard metrics with vs. without corruption active.
-- Capture dashboard screenshots for thesis figures.
-
-#### 2.3 — Results analysis and thesis writing
+#### 2.2 — Results analysis and thesis writing
 **Goal:** All figures and tables needed for the thesis are generated and exported.
 
 - Import the val_defect TSVs already generated into `notebooks/benchmark_graphs and tables.ipynb`:

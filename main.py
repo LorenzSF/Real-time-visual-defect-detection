@@ -159,6 +159,12 @@ def parse_args() -> argparse.Namespace:
         help="Override cfg['run']['run_name']; shapes the output subdir name.",
     )
     p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override cfg['run']['seed']. Reseeds numpy and the dataset splitter.",
+    )
+    p.add_argument(
         "--corruption",
         type=str,
         default=None,
@@ -192,6 +198,8 @@ def main() -> None:
         cfg["dataset"]["extract_dir"] = args.extract_dir
     if args.run_name is not None:
         cfg["run"]["run_name"] = args.run_name
+    if args.seed is not None:
+        cfg["run"]["seed"] = args.seed
 
     # CLI corruption flags override the YAML; passing --corruption alone enables
     # the section, passing --severity alone tweaks the configured corruption.

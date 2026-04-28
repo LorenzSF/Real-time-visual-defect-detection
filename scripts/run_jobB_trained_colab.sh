@@ -17,6 +17,7 @@
 set -euo pipefail
 
 MODEL="${MODEL:-anomalib_stfpm}"
+SEED="${SEED:-42}"
 DATASET_DIR="${DATASET_DIR:-/content/drive/MyDrive/Deceuninck_dataset}"
 RESULTS_DIR="${RESULTS_DIR:-/content/drive/MyDrive/thesis_runs/jobB_trained}"
 WORK_DIR="${WORK_DIR:-/content/work}"
@@ -35,18 +36,19 @@ if [[ ! -d "${DATASET_DIR}/good" || ! -d "${DATASET_DIR}/defects" ]]; then
   exit 1
 fi
 
-marker="${RESULTS_DIR}/jobB_trained__${MODEL}.done"
+marker="${RESULTS_DIR}/jobB_trained__${MODEL}__s${SEED}.done"
 if [[ -f "${marker}" ]]; then
   echo "[jobB_trained] already done (${marker}). Delete it to rerun." >&2
   exit 0
 fi
 
-run_name="jobB_trained_${MODEL}"
+run_name="jobB_trained_${MODEL}_s${SEED}"
 local_dataset="${WORK_DIR}/jobB_trained_deceuninck"
 
 echo "==============================================================="
 echo "[jobB_trained] starting at $(date -u +%H:%M:%S)"
 echo "[jobB_trained] model:      ${MODEL}"
+echo "[jobB_trained] seed:       ${SEED}"
 echo "[jobB_trained] config:     ${CONFIG}"
 echo "[jobB_trained] dataset:    ${DATASET_DIR}"
 echo "[jobB_trained] results to: ${RESULTS_DIR}"
@@ -67,7 +69,8 @@ python main.py \
   --model "${MODEL}" \
   --dataset-path "${local_dataset}" \
   --extract-dir "${local_dataset}" \
-  --run-name "${run_name}"
+  --run-name "${run_name}" \
+  --seed "${SEED}"
 
 latest_run="$(ls -1dt "${WORK_DIR}/runs/${run_name}"_* 2>/dev/null | head -n1)"
 if [[ -z "${latest_run}" || ! -d "${latest_run}" ]]; then

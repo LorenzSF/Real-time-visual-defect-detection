@@ -16,8 +16,9 @@ __pycache__/
 .env
 
 # Pipeline artifacts
-data/runs/
-data/raw/extracted/
+data/outputs/
+data/Deceuninck_dataset/
+data/Real-IAD_dataset/
 
 # Model checkpoints / weights
 *.pt
