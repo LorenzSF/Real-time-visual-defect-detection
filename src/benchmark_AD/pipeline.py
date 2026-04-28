@@ -753,14 +753,16 @@ def _run_single_model(
         total_stages=total_stages,
         stage_name="artifacts",
     )
-    # Stamp every row with the corruption + dataset identity so the JSON is
-    # self-describing; matches the streaming-session predictions.json schema.
+    # Test predictions inherit the active corruption identity so the JSON is
+    # self-describing; validation stays explicitly clean because its images were
+    # never passed through corruption_fn.
     extras = _row_extras(corruption_cfg, corruption_fn, dataset_name)
+    val_extras = _row_extras(None, None, dataset_name)
     for row in rows:
         row.update(extras)
         row.setdefault("heatmap_path", None)
     for row in val_rows:
-        row.update(extras)
+        row.update(val_extras)
         row.setdefault("heatmap_path", None)
 
     pred_path = out_dir / f"predictions_{_safe_name(model_name)}.json"
@@ -796,7 +798,7 @@ def _run_single_model(
 
     # Streaming-shape JSON snapshot for this (model, corruption, severity,
     # dataset) tuple. Mirrors the fields that the live runtime publishes in
-    # data/streaming_input/<session>/live_status.json so tooling is shared.
+    # data/streaming_output/<session>/live_status_<model>.json so tooling is shared.
     live_status = _build_live_status(
         out_dir=out_dir,
         model_name=model_name,

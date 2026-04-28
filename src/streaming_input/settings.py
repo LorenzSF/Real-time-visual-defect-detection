@@ -71,8 +71,8 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     resolved = dict(cfg)
 
     run_cfg = dict(resolved.get("run", {}))
-    run_cfg.setdefault("output_dir", "data/streaming_input")
-    run_cfg.setdefault("session_name", "streaming_input")
+    run_cfg.setdefault("output_dir", "data/streaming_output")
+    run_cfg.setdefault("session_name", "streaming_output")
     run_cfg.setdefault("target_fps", 10.0)
     run_cfg.setdefault("latency_sla_ms", 100.0)
     run_cfg.setdefault("max_frames", None)
@@ -131,5 +131,12 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     web_cfg.setdefault("port", 8765)
     web_cfg.setdefault("refresh_ms", 1000)
     resolved["web"] = web_cfg
+
+    dashboard_cfg = dict(resolved.get("dashboard", {}))
+    dashboard_cfg.setdefault("score_history_size", 100)
+    dashboard_cfg.setdefault("embedding_projection", "pca")
+    dashboard_cfg.setdefault("embedding_reference_limit", 1200)
+    dashboard_cfg.setdefault("embedding_live_points", 250)
+    resolved["dashboard"] = dashboard_cfg
 
     return resolved

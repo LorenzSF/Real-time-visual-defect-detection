@@ -188,6 +188,21 @@ def test_pipeline_saves_corrupted_confusion_samples(
     assert (samples_dir / "part_fn_FN.png").exists()
     assert (samples_dir / "part_tn_TN.png").exists()
 
+    val_rows = json.loads(
+        (out_dir / "validation_predictions_stub_model.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    test_rows = json.loads(
+        (out_dir / "predictions_stub_model.json").read_text(encoding="utf-8")
+    )
+    assert len(val_rows) == 1
+    assert val_rows[0]["corruption_type"] == ""
+    assert val_rows[0]["severity"] == 0
+    assert test_rows
+    assert {row["corruption_type"] for row in test_rows} == {"gaussian_blur"}
+    assert {row["severity"] for row in test_rows} == {3}
+
     summary = json.loads((out_dir / "benchmark_summary.json").read_text(encoding="utf-8"))
     assert summary["models"][0]["corrupted_confusion_samples"]["available_cases"] == [
         "TP",

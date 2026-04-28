@@ -27,6 +27,10 @@ dataset:
   # defects/ via _BAD_DIR_NAMES and uses each subfolder name as defect_type.
   path: "/content/work/current"
   extract_dir: "/content/work/current"
+  split:
+    # Keep the train/val/test partition stable across reruns of the
+    # corruption grid, independent of the notebook/session lifecycle.
+    seed: 42
 
 benchmark:
   save_umap: false

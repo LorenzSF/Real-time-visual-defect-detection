@@ -1,6 +1,6 @@
 run:
-  output_dir: "data/streaming_input"
-  session_name: "streaming_input"
+  output_dir: "data/streaming_output"
+  session_name: "streaming_output"
   target_fps: 10.0
   latency_sla_ms: 100.0
   max_frames: 60
@@ -30,3 +30,9 @@ web:
   host: "127.0.0.1"
   port: 8765
   refresh_ms: 1000
+
+dashboard:
+  score_history_size: 100
+  embedding_projection: "pca"
+  embedding_reference_limit: 1200
+  embedding_live_points: 250

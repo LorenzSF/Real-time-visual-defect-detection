@@ -45,16 +45,19 @@ cells.append(md(
     "\n",
     "Sections:\n",
     "1. **Setup** — paths, imports.\n",
-    "2. **Loader** — walks `data/outputs/jobB_val_defect_V1/` and returns a tidy DataFrame.\n",
-    "3. **§1 Summary metrics per model** — single comparison table, plus a `per_defect_recall` view.\n",
+    "2. **Loader** — walks the JobB output dirs (baseline + seed sweep) and returns a tidy DataFrame.\n",
+    "   Each row is one `(model, seed)` pair, so multi-seed runs surface as multiple rows per model.\n",
+    "3. **§1 Summary metrics per model** — comparison table, generalization gap, per-defect recall.\n",
     "4. **§2 Graphical comparison** — accuracy bars, latency-vs-quality Pareto, generalization gap.\n",
     "5. **§3 Coherence / sanity checks** — flags `0.0` / `1.0` metrics, threshold position relative to\n",
     "   the actual score distribution, sample-count vs fit-time consistency.\n",
-    "6. **§4 Score distributions** — per-model histogram of test scores split by `good` vs `defect`\n",
+    "6. **§4 Score distributions** — per-run histogram of test scores split by `good` vs `defect`\n",
     "   with the calibrated threshold drawn on top.\n",
     "7. **§5 Confusion matrices** — derived from `predictions_*.json` so the headline F1 can be audited.\n",
     "8. **§6 JobB vs JobA reference** — quick reuse of `_analysis/compare_jobB_vs_jobA.tsv`.\n",
-    "9. **§7 Engineering suggestions** — what to look at next, framed for the thesis goal."
+    "9. **§7 Multi-seed coherence** — coverage matrix, mean ± std aggregates, threshold stability,\n",
+    "   saturation re-check across seeds.\n",
+    "10. **§8 Engineering suggestions** — what to look at next, framed for the thesis goal."
 ))
 
 cells.append(md("## 1. Setup"))
@@ -76,13 +79,16 @@ cells.append(code(
     "\n",
     "OUTPUTS = REPO / \"data\" / \"outputs\"\n",
     "JOBB_DIR = OUTPUTS / \"jobB_val_defect_V1\"\n",
+    "JOBB_SEED_DIR = OUTPUTS / \"jobB_val_defect_and_seed\"\n",
     "JOBA_DIR = OUTPUTS / \"jobA_val_defect_V1\"\n",
     "ANALYSIS_DIR = JOBB_DIR / \"_analysis\"\n",
     "\n",
-    "assert JOBB_DIR.is_dir(), f\"missing {JOBB_DIR}\"\n",
-    "print(\"REPO    :\", REPO)\n",
-    "print(\"JOBB    :\", JOBB_DIR)\n",
-    "print(\"JOBA    :\", JOBA_DIR if JOBA_DIR.is_dir() else \"(not present)\")"
+    "JOBB_SOURCES = [d for d in (JOBB_DIR, JOBB_SEED_DIR) if d.is_dir()]\n",
+    "assert JOBB_SOURCES, f\"no JobB output dirs found under {OUTPUTS}\"\n",
+    "print(\"REPO         :\", REPO)\n",
+    "for d in JOBB_SOURCES:\n",
+    "    print(\"JOBB source :\", d)\n",
+    "print(\"JOBA         :\", JOBA_DIR if JOBA_DIR.is_dir() else \"(not present)\")"
 ))
 
 cells.append(md(
@@ -92,47 +98,70 @@ cells.append(md(
     "per model that ran. Some directories bundle 3 models (the Deceuninck mass-eval), others contain a\n",
     "single model — we just iterate and flatten.\n",
     "\n",
+    "The seed lives in `summary['run']['seed']`; when missing we try to recover it from a `_s<N>_`\n",
+    "fragment in the directory name (added by the seed-sweep driver), falling back to `42` (the original\n",
+    "default). The `source` column records which top-level dir a row came from so multi-seed reruns and\n",
+    "the original baseline are easy to slice apart.\n",
+    "\n",
     "Per-image scores are taken from `predictions_<model>.json` and `validation_predictions_<model>.json`."
 ))
 
 cells.append(code(
-    "def load_jobB_runs(directory: Path) -> pd.DataFrame:\n",
+    "_SEED_RE = re.compile(r\"_s(\\d+)_\")\n",
+    "\n",
+    "\n",
+    "def _extract_seed(run_dir_name: str, summary: dict) -> int:\n",
+    "    seed = summary.get(\"run\", {}).get(\"seed\")\n",
+    "    if seed is not None:\n",
+    "        return int(seed)\n",
+    "    m = _SEED_RE.search(run_dir_name)\n",
+    "    return int(m.group(1)) if m else 42\n",
+    "\n",
+    "\n",
+    "def load_jobB_runs(*directories: Path) -> pd.DataFrame:\n",
     "    rows = []\n",
-    "    for run_dir in sorted(p for p in directory.iterdir() if p.is_dir() and not p.name.startswith(\"_\")):\n",
-    "        summary_path = run_dir / \"benchmark_summary.json\"\n",
-    "        if not summary_path.is_file():\n",
+    "    for directory in directories:\n",
+    "        if not directory.is_dir():\n",
     "            continue\n",
-    "        b = json.loads(summary_path.read_text())\n",
-    "        run_meta = {\n",
-    "            \"run_dir\": run_dir.name,\n",
-    "            \"run_id\": b.get(\"run\", {}).get(\"run_id\"),\n",
-    "            \"corruption_enabled\": b.get(\"corruption\", {}).get(\"enabled\"),\n",
-    "            \"corruption_type\": b.get(\"corruption\", {}).get(\"type\"),\n",
-    "            \"corruption_severity\": b.get(\"corruption\", {}).get(\"severity\"),\n",
-    "            \"dataset_path\": b.get(\"dataset\", {}).get(\"path\"),\n",
-    "            \"resize_w\": b.get(\"preprocessing\", {}).get(\"resize\", {}).get(\"width\"),\n",
-    "            \"resize_h\": b.get(\"preprocessing\", {}).get(\"resize\", {}).get(\"height\"),\n",
-    "        }\n",
-    "        for m in b.get(\"models\", []):\n",
-    "            row = {**run_meta}\n",
-    "            row.update({k: v for k, v in m.items() if k not in {\"model_cfg\", \"per_defect_recall\", \"per_defect_support\"}})\n",
-    "            row[\"per_defect_recall\"] = m.get(\"per_defect_recall\", {})\n",
-    "            row[\"per_defect_support\"] = m.get(\"per_defect_support\", {})\n",
-    "            rows.append(row)\n",
+    "        for run_dir in sorted(p for p in directory.iterdir() if p.is_dir() and not p.name.startswith(\"_\")):\n",
+    "            summary_path = run_dir / \"benchmark_summary.json\"\n",
+    "            if not summary_path.is_file():\n",
+    "                continue\n",
+    "            b = json.loads(summary_path.read_text())\n",
+    "            run_meta = {\n",
+    "                \"source\": directory.name,\n",
+    "                \"run_dir\": run_dir.name,\n",
+    "                \"run_path\": str(run_dir),\n",
+    "                \"run_id\": b.get(\"run\", {}).get(\"run_id\"),\n",
+    "                \"seed\": _extract_seed(run_dir.name, b),\n",
+    "                \"corruption_enabled\": b.get(\"corruption\", {}).get(\"enabled\"),\n",
+    "                \"corruption_type\": b.get(\"corruption\", {}).get(\"type\"),\n",
+    "                \"corruption_severity\": b.get(\"corruption\", {}).get(\"severity\"),\n",
+    "                \"dataset_path\": b.get(\"dataset\", {}).get(\"path\"),\n",
+    "                \"resize_w\": b.get(\"preprocessing\", {}).get(\"resize\", {}).get(\"width\"),\n",
+    "                \"resize_h\": b.get(\"preprocessing\", {}).get(\"resize\", {}).get(\"height\"),\n",
+    "            }\n",
+    "            for m in b.get(\"models\", []):\n",
+    "                row = {**run_meta}\n",
+    "                row.update({k: v for k, v in m.items() if k not in {\"model_cfg\", \"per_defect_recall\", \"per_defect_support\"}})\n",
+    "                row[\"per_defect_recall\"] = m.get(\"per_defect_recall\", {})\n",
+    "                row[\"per_defect_support\"] = m.get(\"per_defect_support\", {})\n",
+    "                rows.append(row)\n",
     "    return pd.DataFrame(rows)\n",
     "\n",
     "\n",
-    "def load_predictions(run_dir: Path, model: str, validation: bool = False) -> pd.DataFrame:\n",
+    "def load_predictions(run_path: str | Path, model: str, validation: bool = False) -> pd.DataFrame:\n",
     "    fname = (\"validation_predictions_\" if validation else \"predictions_\") + f\"{model}.json\"\n",
-    "    path = run_dir / fname\n",
+    "    path = Path(run_path) / fname\n",
     "    if not path.is_file():\n",
     "        return pd.DataFrame()\n",
     "    return pd.DataFrame(json.loads(path.read_text()))\n",
     "\n",
     "\n",
-    "df = load_jobB_runs(JOBB_DIR)\n",
-    "print(f\"Loaded {len(df)} model rows from {df['run_dir'].nunique()} run directories.\")\n",
-    "df[[\"run_dir\", \"model\", \"train_samples\", \"val_samples\", \"test_samples\", \"corruption_enabled\"]]"
+    "df = load_jobB_runs(*JOBB_SOURCES)\n",
+    "print(f\"Loaded {len(df)} model rows from {df['run_dir'].nunique()} run directories\"\n",
+    "      f\" across {df['source'].nunique()} source dirs.\")\n",
+    "df[[\"source\", \"run_dir\", \"model\", \"seed\", \"train_samples\", \"val_samples\", \"test_samples\"]]"
 ))
 
 cells.append(md(
@@ -144,7 +173,7 @@ cells.append(md(
 
 cells.append(code(
     "headline_cols = [\n",
-    "    \"model\",\n",
+    "    \"model\", \"seed\",\n",
     "    \"train_samples\", \"val_samples\", \"test_samples\",\n",
     "    \"auroc\", \"aupr\", \"f1\", \"precision\", \"recall\", \"accuracy\",\n",
     "    \"recall_at_fpr_1pct\", \"recall_at_fpr_5pct\", \"macro_recall\", \"weighted_recall\",\n",
@@ -152,29 +181,29 @@ cells.append(code(
     "    \"fit_seconds\", \"predict_seconds\", \"ms_per_image\", \"fps\", \"peak_vram_mb\",\n",
     "]\n",
     "summary = df[headline_cols].copy()\n",
-    "summary = summary.sort_values(\"f1\", ascending=False).reset_index(drop=True)\n",
+    "summary = summary.sort_values([\"model\", \"seed\"]).reset_index(drop=True)\n",
     "summary.round(4)"
 ))
 
 cells.append(code(
-    "# val (calibration) vs test (held-out) — generalization gap.\n",
-    "gap_cols = [\"model\", \"val_f1\", \"f1\", \"val_auroc\", \"auroc\", \"val_aupr\", \"aupr\", \"val_recall\", \"recall\", \"val_precision\", \"precision\"]\n",
+    "# val (calibration) vs test (held-out) — generalization gap, per (model, seed).\n",
+    "gap_cols = [\"model\", \"seed\", \"val_f1\", \"f1\", \"val_auroc\", \"auroc\", \"val_aupr\", \"aupr\", \"val_recall\", \"recall\", \"val_precision\", \"precision\"]\n",
     "gap = df[gap_cols].copy()\n",
     "for m in [\"f1\", \"auroc\", \"aupr\", \"recall\", \"precision\"]:\n",
     "    gap[f\"{m}_gap\"] = gap[m] - gap[f\"val_{m}\"]\n",
-    "gap.set_index(\"model\").round(4)"
+    "gap.sort_values([\"model\", \"seed\"]).set_index([\"model\", \"seed\"]).round(4)"
 ))
 
 cells.append(code(
-    "# Per-defect-type recall — single-row-per-model view.\n",
+    "# Per-defect-type recall — one row per (model, seed).\n",
     "all_defects = sorted({d for r in df[\"per_defect_recall\"] for d in r})\n",
     "rows = []\n",
     "for _, r in df.iterrows():\n",
-    "    rec = {\"model\": r[\"model\"]}\n",
+    "    rec = {\"model\": r[\"model\"], \"seed\": r[\"seed\"]}\n",
     "    for d in all_defects:\n",
     "        rec[d] = r[\"per_defect_recall\"].get(d, np.nan)\n",
     "    rows.append(rec)\n",
-    "per_defect_df = pd.DataFrame(rows).set_index(\"model\").round(4)\n",
+    "per_defect_df = pd.DataFrame(rows).sort_values([\"model\", \"seed\"]).set_index([\"model\", \"seed\"]).round(4)\n",
     "per_defect_df"
 ))
 
@@ -192,52 +221,64 @@ cells.append(md(
 ))
 
 cells.append(code(
+    "# One bar per (model, seed). Models with one seed show a single bar; multi-seed models\n",
+    "# show one bar per seed so cross-seed variance is visible at a glance.\n",
     "metrics = [\"auroc\", \"aupr\", \"f1\", \"precision\", \"recall\", \"recall_at_fpr_1pct\"]\n",
-    "fig, axes = plt.subplots(2, 3, figsize=(14, 7), sharey=True)\n",
-    "order = df.sort_values(\"f1\", ascending=False)[\"model\"].tolist()\n",
+    "df_plot = df.sort_values([\"model\", \"seed\"]).reset_index(drop=True)\n",
+    "labels = [f\"{m.replace('anomalib_', '')}\\ns={s}\" for m, s in zip(df_plot[\"model\"], df_plot[\"seed\"])]\n",
+    "fig, axes = plt.subplots(2, 3, figsize=(15, 7.5), sharey=True)\n",
     "for ax, metric in zip(axes.ravel(), metrics):\n",
-    "    sub = df.set_index(\"model\").loc[order, metric]\n",
-    "    bars = ax.bar(range(len(sub)), sub.values, color=\"#4C72B0\")\n",
-    "    ax.set_xticks(range(len(sub)))\n",
-    "    ax.set_xticklabels([m.replace(\"anomalib_\", \"\") for m in sub.index], rotation=30, ha=\"right\")\n",
+    "    vals = df_plot[metric].values\n",
+    "    bars = ax.bar(range(len(vals)), vals, color=\"#4C72B0\")\n",
+    "    ax.set_xticks(range(len(vals)))\n",
+    "    ax.set_xticklabels(labels, rotation=45, ha=\"right\", fontsize=7)\n",
     "    ax.set_title(metric)\n",
     "    ax.set_ylim(0, 1.05)\n",
     "    ax.axhline(1.0, color=\"#c44e52\", lw=0.7, ls=\":\")\n",
-    "    for b, v in zip(bars, sub.values):\n",
-    "        ax.text(b.get_x() + b.get_width() / 2, v + 0.01, f\"{v:.3f}\", ha=\"center\", va=\"bottom\", fontsize=8)\n",
-    "fig.suptitle(\"JobB — quality metrics per model\", fontsize=12)\n",
+    "    for b, v in zip(bars, vals):\n",
+    "        ax.text(b.get_x() + b.get_width() / 2, v + 0.01, f\"{v:.3f}\", ha=\"center\", va=\"bottom\", fontsize=7)\n",
+    "fig.suptitle(\"JobB — quality metrics per (model, seed)\", fontsize=12)\n",
     "fig.tight_layout()\n",
     "plt.show()"
 ))
 
 cells.append(code(
-    "fig, ax = plt.subplots(figsize=(8, 5))\n",
-    "ax.scatter(df[\"ms_per_image\"], df[\"f1\"], s=80, color=\"#4C72B0\")\n",
-    "for _, r in df.iterrows():\n",
-    "    ax.annotate(r[\"model\"].replace(\"anomalib_\", \"\"),\n",
-    "                (r[\"ms_per_image\"], r[\"f1\"]),\n",
-    "                xytext=(5, 5), textcoords=\"offset points\", fontsize=9)\n",
+    "# Pareto: latency vs F1, one point per (model, seed). Point colour by model,\n",
+    "# annotation shows seed when there are multiple per model.\n",
+    "fig, ax = plt.subplots(figsize=(9, 5.5))\n",
+    "models = sorted(df[\"model\"].unique())\n",
+    "cmap = plt.get_cmap(\"tab10\")\n",
+    "color_by = {m: cmap(i % 10) for i, m in enumerate(models)}\n",
+    "for m in models:\n",
+    "    sub = df[df[\"model\"] == m]\n",
+    "    ax.scatter(sub[\"ms_per_image\"], sub[\"f1\"], s=80, color=color_by[m], label=m.replace(\"anomalib_\", \"\"))\n",
+    "    multi = len(sub) > 1\n",
+    "    for _, r in sub.iterrows():\n",
+    "        tag = f\"s={r['seed']}\" if multi else r[\"model\"].replace(\"anomalib_\", \"\")\n",
+    "        ax.annotate(tag, (r[\"ms_per_image\"], r[\"f1\"]),\n",
+    "                    xytext=(5, 5), textcoords=\"offset points\", fontsize=8)\n",
     "ax.set_xlabel(\"ms / image (lower is better)\")\n",
     "ax.set_ylabel(\"F1 (higher is better)\")\n",
-    "ax.set_title(\"Latency vs quality — JobB Pareto\")\n",
+    "ax.set_title(\"Latency vs quality — JobB Pareto (one point per seed)\")\n",
     "ax.grid(alpha=0.3)\n",
+    "ax.legend(fontsize=8, loc=\"lower left\")\n",
     "plt.tight_layout()\n",
     "plt.show()"
 ))
 
 cells.append(code(
-    "fig, ax = plt.subplots(figsize=(9, 5))\n",
-    "x = np.arange(len(order))\n",
-    "w = 0.35\n",
-    "vals_val = df.set_index(\"model\").loc[order, \"val_f1\"].values\n",
-    "vals_test = df.set_index(\"model\").loc[order, \"f1\"].values\n",
-    "ax.bar(x - w/2, vals_val, w, label=\"val_f1 (calibration)\", color=\"#dd8452\")\n",
-    "ax.bar(x + w/2, vals_test, w, label=\"f1 (held-out test)\", color=\"#4C72B0\")\n",
+    "# Generalization gap per (model, seed). When val_f1 saturates at 1.0 across all seeds\n",
+    "# (as on Deceuninck) the val→test gap is the meaningful number, not val_f1 itself.\n",
+    "fig, ax = plt.subplots(figsize=(11, 5.5))\n",
+    "x = np.arange(len(df_plot))\n",
+    "w = 0.4\n",
+    "ax.bar(x - w/2, df_plot[\"val_f1\"].values, w, label=\"val_f1 (calibration)\", color=\"#dd8452\")\n",
+    "ax.bar(x + w/2, df_plot[\"f1\"].values, w, label=\"f1 (held-out test)\", color=\"#4C72B0\")\n",
     "ax.set_xticks(x)\n",
-    "ax.set_xticklabels([m.replace(\"anomalib_\", \"\") for m in order], rotation=20)\n",
+    "ax.set_xticklabels(labels, rotation=45, ha=\"right\", fontsize=7)\n",
     "ax.set_ylim(0, 1.05)\n",
     "ax.set_ylabel(\"F1\")\n",
-    "ax.set_title(\"Generalization: validation F1 vs test F1\")\n",
+    "ax.set_title(\"Generalization: validation F1 vs test F1, per (model, seed)\")\n",
     "ax.legend()\n",
     "plt.tight_layout()\n",
     "plt.show()"
@@ -255,7 +296,7 @@ cells.append(md(
 ))
 
 cells.append(code(
-    "# 3.1 — flag suspiciously round metric values\n",
+    "# 3.1 — flag suspiciously round metric values, per (model, seed)\n",
     "watch = [\"auroc\", \"aupr\", \"f1\", \"precision\", \"recall\",\n",
     "         \"val_auroc\", \"val_f1\", \"val_precision\", \"val_recall\",\n",
     "         \"recall_at_fpr_1pct\", \"recall_at_fpr_5pct\",\n",
@@ -268,17 +309,17 @@ cells.append(code(
     "        if v is None or pd.isna(v):\n",
     "            continue\n",
     "        if abs(v - 1.0) < EPS:\n",
-    "            flags.append({\"model\": r[\"model\"], \"metric\": col, \"value\": v, \"note\": \"== 1.0 exactly\"})\n",
+    "            flags.append({\"model\": r[\"model\"], \"seed\": r[\"seed\"], \"metric\": col, \"value\": v, \"note\": \"== 1.0 exactly\"})\n",
     "        elif abs(v) < EPS:\n",
-    "            flags.append({\"model\": r[\"model\"], \"metric\": col, \"value\": v, \"note\": \"== 0.0 exactly\"})\n",
+    "            flags.append({\"model\": r[\"model\"], \"seed\": r[\"seed\"], \"metric\": col, \"value\": v, \"note\": \"== 0.0 exactly\"})\n",
     "        elif v > 0.9999 and v < 1.0:\n",
-    "            flags.append({\"model\": r[\"model\"], \"metric\": col, \"value\": v, \"note\": \"> 0.9999 (effectively saturated)\"})\n",
+    "            flags.append({\"model\": r[\"model\"], \"seed\": r[\"seed\"], \"metric\": col, \"value\": v, \"note\": \"> 0.9999 (effectively saturated)\"})\n",
     "flag_df = pd.DataFrame(flags)\n",
     "if flag_df.empty:\n",
     "    print(\"No saturated metrics — all values are intermediate decimals.\")\n",
     "else:\n",
     "    print(f\"{len(flag_df)} saturated metric values:\")\n",
-    "    display(flag_df.sort_values([\"model\", \"metric\"]).reset_index(drop=True))"
+    "    display(flag_df.sort_values([\"model\", \"seed\", \"metric\"]).reset_index(drop=True))"
 ))
 
 cells.append(code(
@@ -292,13 +333,13 @@ cells.append(code(
     "# 3.3 — does the calibrated threshold sit inside the actual score range on val and test?\n",
     "rows = []\n",
     "for _, r in df.iterrows():\n",
-    "    run_dir = JOBB_DIR / r[\"run_dir\"]\n",
-    "    test = load_predictions(run_dir, r[\"model\"], validation=False)\n",
-    "    val = load_predictions(run_dir, r[\"model\"], validation=True)\n",
+    "    test = load_predictions(r[\"run_path\"], r[\"model\"], validation=False)\n",
+    "    val = load_predictions(r[\"run_path\"], r[\"model\"], validation=True)\n",
     "    if test.empty:\n",
     "        continue\n",
     "    rows.append({\n",
     "        \"model\": r[\"model\"],\n",
+    "        \"seed\": r[\"seed\"],\n",
     "        \"threshold\": r[\"threshold_used\"],\n",
     "        \"val_score_min\": val[\"score\"].min() if not val.empty else None,\n",
     "        \"val_score_max\": val[\"score\"].max() if not val.empty else None,\n",
@@ -309,34 +350,37 @@ cells.append(code(
     "        \"test_score_unique\": test[\"score\"].nunique(),\n",
     "        \"frac_test_above_thr\": (test[\"score\"] > r[\"threshold_used\"]).mean(),\n",
     "    })\n",
-    "score_range = pd.DataFrame(rows).set_index(\"model\").round(6)\n",
+    "score_range = pd.DataFrame(rows).sort_values([\"model\", \"seed\"]).set_index([\"model\", \"seed\"]).round(6)\n",
     "score_range"
 ))
 
 cells.append(code(
-    "# 3.4 — class balance per model (should be identical, since same split).\n",
+    "# 3.4 — class balance per (model, seed). Same dataset and split rules → all rows\n",
+    "# should match within a seed; cross-seed differences here would mean the splitter is\n",
+    "# allocating different test sets per seed, which is the expected behaviour for\n",
+    "# stratify=True + different RNG.\n",
     "rows = []\n",
     "for _, r in df.iterrows():\n",
-    "    test = load_predictions(JOBB_DIR / r[\"run_dir\"], r[\"model\"])\n",
+    "    test = load_predictions(r[\"run_path\"], r[\"model\"])\n",
     "    if test.empty:\n",
     "        continue\n",
     "    rows.append({\n",
     "        \"model\": r[\"model\"],\n",
+    "        \"seed\": r[\"seed\"],\n",
     "        \"n_test\": len(test),\n",
     "        \"n_good\": int((test[\"label\"] == 0).sum()),\n",
     "        \"n_defect\": int((test[\"label\"] == 1).sum()),\n",
     "        \"defect_rate\": float((test[\"label\"] == 1).mean()),\n",
     "    })\n",
-    "pd.DataFrame(rows).set_index(\"model\")"
+    "pd.DataFrame(rows).sort_values([\"model\", \"seed\"]).set_index([\"model\", \"seed\"]).round(4)"
 ))
 
 cells.append(code(
-    "# 3.5 — fit-time vs sample-count plausibility.\n",
-    "df.assign(seconds_per_train_sample=df[\"fit_seconds\"] / df[\"train_samples\"]) \\\n",
-    "  [[\"model\", \"train_samples\", \"fit_seconds\", \"predict_seconds\", \"ms_per_image\"]] \\\n",
-    "  .assign(seconds_per_train_sample=lambda x: x[\"fit_seconds\"] / x[\"train_samples\"]) \\\n",
-    "  .round(2) \\\n",
-    "  .sort_values(\"fit_seconds\", ascending=False)"
+    "# 3.5 — fit-time vs sample-count plausibility, per (model, seed).\n",
+    "(df[[\"model\", \"seed\", \"train_samples\", \"fit_seconds\", \"predict_seconds\", \"ms_per_image\"]]\n",
+    "   .assign(seconds_per_train_sample=lambda x: x[\"fit_seconds\"] / x[\"train_samples\"])\n",
+    "   .round(2)\n",
+    "   .sort_values([\"model\", \"seed\"]))"
 ))
 
 cells.append(md(
@@ -360,13 +404,17 @@ cells.append(md(
 ))
 
 cells.append(code(
-    "n = len(df)\n",
+    "# Score histograms — to keep the grid manageable across many seeds we show one\n",
+    "# histogram per (model, seed) but use the seed=42 baseline as the canonical row when\n",
+    "# present, and only add extra seeds for models that have multi-seed coverage.\n",
+    "df_hist = df.sort_values([\"model\", \"seed\"]).reset_index(drop=True)\n",
+    "n = len(df_hist)\n",
     "ncols = 2\n",
     "nrows = (n + ncols - 1) // ncols\n",
-    "fig, axes = plt.subplots(nrows, ncols, figsize=(13, 3.2 * nrows))\n",
+    "fig, axes = plt.subplots(nrows, ncols, figsize=(13, 3.0 * nrows))\n",
     "axes = np.array(axes).reshape(nrows, ncols)\n",
-    "for ax, (_, r) in zip(axes.ravel(), df.iterrows()):\n",
-    "    test = load_predictions(JOBB_DIR / r[\"run_dir\"], r[\"model\"])\n",
+    "for ax, (_, r) in zip(axes.ravel(), df_hist.iterrows()):\n",
+    "    test = load_predictions(r[\"run_path\"], r[\"model\"])\n",
     "    if test.empty:\n",
     "        ax.set_visible(False)\n",
     "        continue\n",
@@ -377,13 +425,13 @@ cells.append(code(
     "    ax.hist(bad_scores, bins=bins, alpha=0.65, label=f\"defect (n={len(bad_scores)})\", color=\"#c44e52\")\n",
     "    ax.axvline(r[\"threshold_used\"], color=\"black\", ls=\"--\", lw=1, label=f\"thr={r['threshold_used']:.4f}\")\n",
     "    ax.set_yscale(\"log\")\n",
-    "    ax.set_title(f\"{r['model']}\")\n",
+    "    ax.set_title(f\"{r['model']} (seed={r['seed']})\")\n",
     "    ax.set_xlabel(\"anomaly score\")\n",
     "    ax.set_ylabel(\"count (log)\")\n",
     "    ax.legend(fontsize=8, loc=\"upper left\")\n",
-    "for ax in axes.ravel()[len(df):]:\n",
+    "for ax in axes.ravel()[len(df_hist):]:\n",
     "    ax.set_visible(False)\n",
-    "fig.suptitle(\"JobB — test score distributions per model\", fontsize=12)\n",
+    "fig.suptitle(\"JobB — test score distributions per (model, seed)\", fontsize=12)\n",
     "fig.tight_layout()\n",
     "plt.show()"
 ))
@@ -409,8 +457,8 @@ cells.append(code(
     "            cm.loc[row] = 0\n",
     "    return cm.loc[[\"good\", \"defect\"], [\"pred_good\", \"pred_defect\"]]\n",
     "\n",
-    "for _, r in df.iterrows():\n",
-    "    test = load_predictions(JOBB_DIR / r[\"run_dir\"], r[\"model\"])\n",
+    "for _, r in df.sort_values([\"model\", \"seed\"]).iterrows():\n",
+    "    test = load_predictions(r[\"run_path\"], r[\"model\"])\n",
     "    if test.empty:\n",
     "        continue\n",
     "    cm = confusion(test)\n",
@@ -420,7 +468,7 @@ cells.append(code(
     "    tn = cm.loc[\"good\", \"pred_good\"]\n",
     "    prec = tp / (tp + fp) if (tp + fp) else float(\"nan\")\n",
     "    rec = tp / (tp + fn) if (tp + fn) else float(\"nan\")\n",
-    "    print(f\"=== {r['model']} ===\")\n",
+    "    print(f\"=== {r['model']} (seed={r['seed']}) ===\")\n",
     "    print(cm.to_string())\n",
     "    print(f\"recomputed precision={prec:.4f} recall={rec:.4f} (reported precision={r['precision']:.4f} recall={r['recall']:.4f})\")\n",
     "    print()"
@@ -476,14 +524,187 @@ cells.append(code(
     "    summary = extra_df.groupby(\"model\")[[\"auroc\", \"f1\", \"recall\", \"ms_per_image\", \"fit_seconds\"]].agg([\"mean\", \"std\", \"count\"]).round(3)\n",
     "    print(\"=== JobA aggregate for JobB-only models ===\")\n",
     "    display(summary)\n",
-    "    print(\"\\n=== JobB single-shot numbers for the same models ===\")\n",
-    "    display(df[df[\"model\"].isin(extra_models)][[\"model\", \"auroc\", \"f1\", \"recall\", \"ms_per_image\", \"fit_seconds\"]].round(3))\n",
+    "    print(\"\\n=== JobB per-seed numbers for the same models ===\")\n",
+    "    display(df[df[\"model\"].isin(extra_models)][[\"model\", \"seed\", \"auroc\", \"f1\", \"recall\", \"ms_per_image\", \"fit_seconds\"]].sort_values([\"model\", \"seed\"]).round(3))\n",
     "else:\n",
     "    print(\"(no JobA runs covering draem/stfpm/rd4ad found)\")"
 ))
 
 cells.append(md(
-    "## §7 Engineering suggestions — what to look at next\n",
+    "## §7 Multi-seed coherence\n",
+    "\n",
+    "The original JobB run was a single seed (`seed=42`). With the seed-sweep outputs now under\n",
+    "`data/outputs/jobB_val_defect_and_seed/`, several models have 2–4 seeds available. This section\n",
+    "answers the question: **does the multi-seed evidence change which numbers we should trust?**\n",
+    "\n",
+    "Coherence checks here:\n",
+    "1. Coverage matrix — which `(model, seed)` pairs we actually have.\n",
+    "2. Per-model mean ± std of the headline metrics (only computed for models with ≥2 seeds).\n",
+    "3. Threshold stability — how much the calibrated threshold varies across seeds.\n",
+    "4. Saturation re-check — which metrics still hit `1.0` in *every* seed (truly saturated)\n",
+    "   versus only in some seeds (artifact of a single split)."
+))
+
+cells.append(code(
+    "# §7.1 — coverage matrix: rows = model, cols = seed, value = number of runs.\n",
+    "coverage = (df.assign(n=1)\n",
+    "              .pivot_table(index=\"model\", columns=\"seed\", values=\"n\", aggfunc=\"sum\", fill_value=0)\n",
+    "              .astype(int))\n",
+    "coverage[\"total_seeds\"] = (coverage > 0).sum(axis=1)\n",
+    "print(\"=== seeds available per model ===\")\n",
+    "coverage"
+))
+
+cells.append(code(
+    "# §7.2 — mean ± std for headline metrics, only for models with >= 2 seeds.\n",
+    "agg_metrics = [\"auroc\", \"aupr\", \"f1\", \"precision\", \"recall\",\n",
+    "               \"recall_at_fpr_1pct\", \"macro_recall\",\n",
+    "               \"threshold_used\", \"ms_per_image\", \"peak_vram_mb\"]\n",
+    "agg = (df.groupby(\"model\")[agg_metrics]\n",
+    "         .agg([\"mean\", \"std\", \"min\", \"max\", \"count\"])\n",
+    "         .round(4))\n",
+    "# Drop single-seed models from the aggregate view so std isn't NaN-misleading.\n",
+    "n_seeds = df.groupby(\"model\")[\"seed\"].nunique()\n",
+    "multi_seed_models = n_seeds[n_seeds >= 2].index.tolist()\n",
+    "single_seed_models = n_seeds[n_seeds < 2].index.tolist()\n",
+    "if multi_seed_models:\n",
+    "    print(\"=== multi-seed aggregates (n_seeds >= 2) ===\")\n",
+    "    display(agg.loc[multi_seed_models])\n",
+    "if single_seed_models:\n",
+    "    print(f\"\\nSingle-seed only (excluded from aggregates): {single_seed_models}\")"
+))
+
+cells.append(code(
+    "# §7.3 — threshold stability across seeds.\n",
+    "# Coefficient of variation = std/mean. Small CV = calibration is reproducible.\n",
+    "if multi_seed_models:\n",
+    "    thr_stats = (df[df[\"model\"].isin(multi_seed_models)]\n",
+    "                   .groupby(\"model\")[\"threshold_used\"]\n",
+    "                   .agg([\"mean\", \"std\", \"min\", \"max\"]))\n",
+    "    thr_stats[\"cv\"] = thr_stats[\"std\"] / thr_stats[\"mean\"]\n",
+    "    thr_stats = thr_stats.round(4)\n",
+    "    print(\"=== threshold_used stability across seeds ===\")\n",
+    "    display(thr_stats)\n",
+    "else:\n",
+    "    print(\"(no multi-seed models — skip)\")"
+))
+
+cells.append(code(
+    "# §7.4 — saturation re-check across seeds.\n",
+    "# A metric that was '== 1.0 exactly' in seed=42 might now be intermediate at other seeds.\n",
+    "# Compare: which metrics stay saturated across ALL seeds vs varied at least once?\n",
+    "EPS = 1e-9\n",
+    "watch = [\"auroc\", \"aupr\", \"f1\", \"precision\", \"recall\",\n",
+    "         \"val_auroc\", \"val_f1\", \"val_precision\", \"val_recall\",\n",
+    "         \"recall_at_fpr_1pct\", \"recall_at_fpr_5pct\",\n",
+    "         \"macro_recall\", \"weighted_recall\", \"accuracy\"]\n",
+    "rows = []\n",
+    "for model, grp in df.groupby(\"model\"):\n",
+    "    if len(grp) < 2:\n",
+    "        continue\n",
+    "    for col in watch:\n",
+    "        vals = grp[col].dropna().values\n",
+    "        if len(vals) == 0:\n",
+    "            continue\n",
+    "        all_one = bool(np.all(np.abs(vals - 1.0) < EPS))\n",
+    "        any_one = bool(np.any(np.abs(vals - 1.0) < EPS))\n",
+    "        if all_one or any_one:\n",
+    "            rows.append({\n",
+    "                \"model\": model,\n",
+    "                \"metric\": col,\n",
+    "                \"n_seeds\": len(vals),\n",
+    "                \"min\": float(vals.min()),\n",
+    "                \"max\": float(vals.max()),\n",
+    "                \"all_seeds_eq_1\": all_one,\n",
+    "                \"some_seed_eq_1\": any_one,\n",
+    "            })\n",
+    "sat = pd.DataFrame(rows)\n",
+    "if sat.empty:\n",
+    "    print(\"No multi-seed metric ever reached 1.0 — no saturation to discuss.\")\n",
+    "else:\n",
+    "    truly = sat[sat[\"all_seeds_eq_1\"]]\n",
+    "    sometimes = sat[(sat[\"some_seed_eq_1\"]) & (~sat[\"all_seeds_eq_1\"])]\n",
+    "    print(f\"Metrics that stay at exactly 1.0 across ALL seeds (truly saturated): {len(truly)}\")\n",
+    "    if not truly.empty:\n",
+    "        display(truly[[\"model\", \"metric\", \"n_seeds\", \"min\", \"max\"]].sort_values([\"model\", \"metric\"]).reset_index(drop=True))\n",
+    "    print(f\"\\nMetrics that hit 1.0 in SOME seed but vary in others (single-seed artifact): {len(sometimes)}\")\n",
+    "    if not sometimes.empty:\n",
+    "        display(sometimes[[\"model\", \"metric\", \"n_seeds\", \"min\", \"max\"]].sort_values([\"model\", \"metric\"]).reset_index(drop=True))"
+))
+
+cells.append(code(
+    "# §7.5 — visualization: mean ± std of f1 / auroc / recall / aupr per multi-seed model,\n",
+    "# with single-seed models drawn as a single point (no error bar).\n",
+    "if multi_seed_models or single_seed_models:\n",
+    "    plot_metrics = [\"auroc\", \"aupr\", \"f1\", \"recall\"]\n",
+    "    fig, axes = plt.subplots(1, len(plot_metrics), figsize=(4.0 * len(plot_metrics), 5), sharey=True)\n",
+    "    model_order = sorted(df[\"model\"].unique())\n",
+    "    x = np.arange(len(model_order))\n",
+    "    for ax, metric in zip(axes, plot_metrics):\n",
+    "        means, stds, ns = [], [], []\n",
+    "        for m in model_order:\n",
+    "            vals = df.loc[df[\"model\"] == m, metric].values\n",
+    "            means.append(np.mean(vals))\n",
+    "            stds.append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)\n",
+    "            ns.append(len(vals))\n",
+    "        colors = [\"#4C72B0\" if n >= 2 else \"#bbbbbb\" for n in ns]\n",
+    "        ax.bar(x, means, yerr=stds, capsize=4, color=colors, edgecolor=\"black\", linewidth=0.5)\n",
+    "        for xi, mn, n in zip(x, means, ns):\n",
+    "            ax.text(xi, mn + 0.015, f\"n={n}\", ha=\"center\", va=\"bottom\", fontsize=8)\n",
+    "        ax.set_title(metric)\n",
+    "        ax.set_xticks(x)\n",
+    "        ax.set_xticklabels([m.replace(\"anomalib_\", \"\") for m in model_order], rotation=30, ha=\"right\")\n",
+    "        ax.set_ylim(0, 1.08)\n",
+    "        ax.axhline(1.0, color=\"#c44e52\", lw=0.7, ls=\":\")\n",
+    "    fig.suptitle(\"JobB — mean ± std across seeds (grey bars = single seed only, no error bar)\", fontsize=12)\n",
+    "    fig.tight_layout()\n",
+    "    plt.show()"
+))
+
+cells.append(code(
+    "# §7.6 — per-defect recall variance across seeds (multi-seed models only).\n",
+    "# Surfaces which defect classes are stable predictions vs which flip across splits.\n",
+    "rows = []\n",
+    "for _, r in df.iterrows():\n",
+    "    for d, v in (r[\"per_defect_recall\"] or {}).items():\n",
+    "        rows.append({\"model\": r[\"model\"], \"seed\": r[\"seed\"], \"defect\": d, \"recall\": v})\n",
+    "long = pd.DataFrame(rows)\n",
+    "if not long.empty:\n",
+    "    pd_stats = (long[long[\"model\"].isin(multi_seed_models)]\n",
+    "                  .groupby([\"model\", \"defect\"])[\"recall\"]\n",
+    "                  .agg([\"mean\", \"std\", \"min\", \"max\", \"count\"])\n",
+    "                  .round(4))\n",
+    "    if not pd_stats.empty:\n",
+    "        print(\"=== per-defect recall — mean ± std across seeds ===\")\n",
+    "        display(pd_stats)\n",
+    "    else:\n",
+    "        print(\"(no multi-seed models with per-defect recall)\")"
+))
+
+cells.append(md(
+    "**Reading §7:**\n",
+    "\n",
+    "- **§7.1 coverage** tells you how much weight each per-model aggregate carries. Anything with\n",
+    "  `total_seeds < 3` should be reported as a point estimate, not a mean ± std.\n",
+    "- **§7.2 aggregates** is the table that goes into the thesis. Models with `count == 1` are\n",
+    "  excluded so a misleading `std=NaN` does not leak into the writeup.\n",
+    "- **§7.3 threshold CV** is the calibration-stability check. A coefficient of variation under\n",
+    "  ~0.05 means `val_f1` (or `val_quantile`) reliably picks the same operating point across\n",
+    "  splits. If CV is large for a model, the threshold mode for that model is fragile and the\n",
+    "  test-set numbers depend on which goods happen to be in val.\n",
+    "- **§7.4 saturation re-check** is the *coherence* answer. Metrics in `truly` saturated stayed at\n",
+    "  exactly 1.0 across *every* available seed — those are real but should still be retested with\n",
+    "  more seeds. Metrics in `sometimes` were saturated only at seed=42 — those are the\n",
+    "  single-seed-artifact numbers we suspected; they no longer support a `f1=1.0` claim.\n",
+    "- **§7.5 visualization** is the figure for the thesis. Grey bars (single-seed) communicate that\n",
+    "  the value is a point estimate, not an aggregate, without dropping the model entirely.\n",
+    "- **§7.6 per-defect variance** highlights which defect classes are *robustly* recognised. A class\n",
+    "  with `std≈0` across seeds is a stable prediction; a class with high std reveals that recognition\n",
+    "  depends on which examples landed in train vs test."
+))
+
+cells.append(md(
+    "## §8 Engineering suggestions — what to look at next\n",
     "\n",
     "Framed for the thesis goal (real-time visual defect detection that holds up on a single industrial\n",
     "dataset). These are the questions the data above cannot fully answer on its own — flagging them so\n",
