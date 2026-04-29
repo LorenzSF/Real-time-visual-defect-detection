@@ -1,4 +1,8 @@
+# Local dataset and output artifacts
 data/
+data/outputs/
+data/Deceuninck_dataset/
+data/Real-IAD_dataset/
 *.bmp
 *.png
 *.jpg
@@ -10,15 +14,11 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+*.egg-info/
 
 # Local environments
 .venv/
 .env
-
-# Pipeline artifacts
-data/outputs/
-data/Deceuninck_dataset/
-data/Real-IAD_dataset/
 
 # Model checkpoints / weights
 *.pt
@@ -28,6 +28,8 @@ data/Real-IAD_dataset/
 # Docker build artifacts
 .docker/
 *.dockerbuild
+Dockerfile
+docker-compose*.yml
 
 # Local workspace / notes
 .claude/
@@ -37,7 +39,7 @@ memory/
 METHOD*
 *PLAN*
 
-# Execution helpers kept local
+# Execution with online hardware GPUs
 notebooks/*colab*.ipynb
 scripts/*colab*.sh
 scripts/*wice*.sh

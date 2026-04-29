@@ -83,6 +83,8 @@ def resolve_runtime_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     artifact_cfg.setdefault("run_dir", None)
     artifact_cfg.setdefault("model_name", "rd4ad")
     artifact_cfg.setdefault("fit_policy", "auto")
+    artifact_cfg.setdefault("dataset_path_override", None)
+    artifact_cfg.setdefault("extract_dir_override", None)
 
     run_dir = artifact_cfg.get("run_dir")
     if run_dir in (None, "", "latest"):

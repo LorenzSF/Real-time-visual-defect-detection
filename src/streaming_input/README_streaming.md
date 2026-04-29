@@ -21,12 +21,14 @@ Runs the model selected by the benchmark in a simulated production loop and serv
   - `preprocessing` — must mirror the benchmark run (resize 512×512, `0_1` normalize) so the loaded model sees the input distribution it was calibrated on.
   - `web` — host, port, refresh interval.
   - `dashboard` — score history length, embedding projector (`pca` default, `umap` optional), reference-set cap, live-point cap.
-- CLI overrides on `runtime_main.py`: `--model`, `--run-dir`, `--corruption`, `--severity`.
+- CLI overrides on `runtime_main.py`: `--model`, `--run-dir`, `--fit-policy`, `--dataset-path`, `--extract-dir`, `--input-dir`, `--loop`, `--port`, `--corruption`, `--severity`.
 
 ## Considerations
 
 - **Manual model selection.** The streaming app does not auto-pick a winner — `--model <name>` must be passed explicitly, decided from the consolidated headline table and robustness curves.
 - **Reuses benchmark artifacts.** A streaming session never trains; it loads the model state from a benchmark run dir, guaranteeing the same threshold and preprocessing as in the reported numbers.
+- **Historical fit still happens for most models.** The current runtime rebuilds the model from the benchmark metadata and re-fits it on the historical training split when the backend is not warm-started; it does not yet restore serialized weights from disk.
+- **Path portability is explicit.** If a benchmark summary was produced on Colab/HPC and embeds paths that do not exist on the current machine, pass `--dataset-path` / `--extract-dir` so the runtime reconstructs the split against local copies of the same dataset.
 - **Single-screen dashboard panels** (per PLAN.md §2.1): overlaid frame, anomaly-score gauge with threshold marker, rolling FPS, anomaly rate, score-history line chart, live 2D embedding scatter.
 - **Embedding projector is fitted once at startup** on training-set embeddings (PCA by default, UMAP optional) and frozen; live frames are projected through the fixed transformer so the scatter is comparable across the session.
 - **Score-only colouring** — green→red gradient driven by anomaly score, no ground-truth labels at inference time.

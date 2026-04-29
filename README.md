@@ -1,6 +1,6 @@
-# Real-Time Visual Defect Detection
+# Evaluation of Unsupervised Defect Detection Models on Industrial Data Streams Under Corruption
 
-Thesis pipeline for evaluating and deploying anomaly-detection models on industrial imagery, from offline benchmarking to a live operator dashboard.
+Thesis pipeline backing the work above: from offline benchmarking of unsupervised AD models, through synthetic corruption stress-testing, to a live streaming-inference dashboard suitable for a factory operator.
 
 ## Integral View
 
@@ -13,11 +13,11 @@ Thesis pipeline for evaluating and deploying anomaly-detection models on industr
 
 ## Sections of Work
 
-The pipeline is split into three independent modules under [src/](src/). Each one has its own README explaining how it works, what to configure, and why.
+The pipeline is split into three independent modules under [src/](src/). Each module ships its own README explaining how it works, what to configure, and why.
 
-- [src/benchmark_AD/](src/benchmark_AD/) — **Benchmarking pipeline.** Reproducible offline evaluation of SOTA AD models on Real-IAD and Deceuninck. See [src/benchmark_AD/README.md](src/benchmark_AD/README.md).
-- [src/corruptions/](src/corruptions/) — **Corruption robustness.** Synthetic image corruptions injected into the test set to measure degradation curves. See [src/corruptions/README.md](src/corruptions/README.md).
-- [src/streaming_input/](src/streaming_input/) — **Streaming inference + XAI dashboard.** Per-frame inference loop and live operator panel reusing a benchmark-trained model. See [src/streaming_input/README.md](src/streaming_input/README.md).
+- **Benchmarking pipeline** — reproducible offline evaluation of SOTA unsupervised AD models on Real-IAD and Deceuninck → [src/benchmark_AD/README.md](src/benchmark_AD/README.md).
+- **Corruption robustness** — synthetic image corruptions injected into the test set to measure degradation curves → [src/corruptions/README.md](src/corruptions/README.md).
+- **Streaming inference + XAI dashboard** — per-frame inference loop and live operator panel reusing a benchmark-trained model → [src/streaming_input/README.md](src/streaming_input/README.md).
 
 ## License
 

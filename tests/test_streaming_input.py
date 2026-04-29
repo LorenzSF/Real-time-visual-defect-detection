@@ -92,16 +92,36 @@ def test_runtime_app_emits_model_suffixed_artifacts(tmp_path: Path, monkeypatch)
     ]
 
     class _FakeFrameInference:
-        def __init__(self, run_dir: Path, model_name: str, fit_policy: str = "auto") -> None:
+        init_calls: list[dict[str, object]] = []
+
+        def __init__(
+            self,
+            run_dir: Path,
+            model_name: str,
+            fit_policy: str = "auto",
+            dataset_path_override: str | None = None,
+            extract_dir_override: str | None = None,
+        ) -> None:
             self.run_dir = Path(run_dir)
             self.model_name = model_name
             self.fit_policy = fit_policy
+            self.dataset_path_override = dataset_path_override
+            self.extract_dir_override = extract_dir_override
             self.threshold = 0.5
             self.summary = {
                 "run_name": "baseline",
                 "models": [{"model": model_name, "threshold_used": self.threshold}],
             }
             self._scores = iter((0.2, 0.9))
+            type(self).init_calls.append(
+                {
+                    "run_dir": self.run_dir,
+                    "model_name": self.model_name,
+                    "fit_policy": self.fit_policy,
+                    "dataset_path_override": self.dataset_path_override,
+                    "extract_dir_override": self.extract_dir_override,
+                }
+            )
 
         def predict(self, image: np.ndarray):
             score = next(self._scores)
@@ -131,6 +151,9 @@ def test_runtime_app_emits_model_suffixed_artifacts(tmp_path: Path, monkeypatch)
         "artifact": {
             "run_dir": str(tmp_path),
             "model_name": "stub_model",
+            "fit_policy": "historical_fit",
+            "dataset_path_override": str(tmp_path / "history"),
+            "extract_dir_override": str(tmp_path / "history_extract"),
         },
         "input": {
             "root_dir": str(input_root),
@@ -163,6 +186,15 @@ def test_runtime_app_emits_model_suffixed_artifacts(tmp_path: Path, monkeypatch)
     )
 
     assert benchmark_summary["models"][0]["model"] == "stub_model"
+    assert _FakeFrameInference.init_calls == [
+        {
+            "run_dir": tmp_path,
+            "model_name": "stub_model",
+            "fit_policy": "historical_fit",
+            "dataset_path_override": str(tmp_path / "history"),
+            "extract_dir_override": str(tmp_path / "history_extract"),
+        }
+    ]
     assert len(predictions) == 2
     assert [row["path"] for row in predictions] == [
         str(input_root / "good.png"),

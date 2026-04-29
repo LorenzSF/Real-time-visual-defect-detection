@@ -1,6 +1,5 @@
 """Live XAI dashboard server for the streaming inference loop.
 
-Implements PLAN.md §2.1 on top of the existing lightweight HTTP server.
 The UI stays dependency-free on the frontend and consumes two JSON feeds:
 
 * ``/api/bootstrap`` for static embedding-reference data

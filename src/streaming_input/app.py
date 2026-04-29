@@ -7,7 +7,7 @@ inference, and writes the streaming-session outputs:
 
 Folds the previous input_handler.py + decision_engine.py + live_metrics.py
 + report_generator.py into one module so the package matches the four-file
-layout prescribed by PLAN.md.
+layout.
 """
 from __future__ import annotations
 
@@ -492,6 +492,8 @@ class StreamingInputApp:
             run_dir=Path(self.cfg["artifact"]["resolved_run_dir"]),
             model_name=str(self.cfg["artifact"]["model_name"]),
             fit_policy=str(self.cfg["artifact"]["fit_policy"]),
+            dataset_path_override=self.cfg["artifact"].get("dataset_path_override"),
+            extract_dir_override=self.cfg["artifact"].get("extract_dir_override"),
         )
         self.corruption_cfg = dict(self.cfg.get("corruption", {}))
         self.dataset_name = Path(self.cfg["input"]["root_dir"]).resolve().name

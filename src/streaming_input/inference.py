@@ -98,10 +98,18 @@ class FrameInference:
         run_dir: Path,
         model_name: str,
         fit_policy: str = "auto",
+        dataset_path_override: Optional[str] = None,
+        extract_dir_override: Optional[str] = None,
     ) -> None:
         self.run_dir = Path(run_dir).resolve()
         self.model_name = str(model_name)
         self.fit_policy = str(fit_policy).lower()
+        self.dataset_path_override = (
+            str(dataset_path_override) if dataset_path_override not in (None, "") else None
+        )
+        self.extract_dir_override = (
+            str(extract_dir_override) if extract_dir_override not in (None, "") else None
+        )
 
         summary = _read_summary(self.run_dir)
         self.summary = dict(summary)
@@ -155,10 +163,19 @@ class FrameInference:
             self.model.threshold = self.threshold
 
     def _resolve_dataset_split(self) -> SplitResult:
+        source_type = str(self.dataset_cfg["source_type"])
+        dataset_path = self.dataset_path_override or self.dataset_cfg["path"]
+        extract_dir = self.extract_dir_override
+        if extract_dir is None:
+            if self.dataset_path_override is not None and source_type == "folder":
+                extract_dir = dataset_path
+            else:
+                extract_dir = self.dataset_cfg["extract_dir"]
+
         samples = resolve_dataset_labeled(
-            self.dataset_cfg["source_type"],
-            self.dataset_cfg["path"],
-            self.dataset_cfg["extract_dir"],
+            source_type,
+            dataset_path,
+            extract_dir,
             dataset_format=self.dataset_cfg.get("format"),
             cameras=self.dataset_cfg.get("cameras"),
         )
