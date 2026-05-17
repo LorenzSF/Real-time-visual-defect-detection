@@ -4,6 +4,7 @@ from typing import Callable, Iterator
 
 import numpy as np
 from PIL import Image, ImageFilter
+from scipy.ndimage import uniform_filter1d
 
 from .schemas import CorruptionConfig, Frame
 
@@ -56,12 +57,8 @@ def _shot_noise(img: np.ndarray, severity: int) -> np.ndarray:
 def _motion_blur(img: np.ndarray, severity: int) -> np.ndarray:
     radius = [3, 5, 7][severity - 1]
     n = radius * 2 + 1
-    flat = [0.0] * (n * n)
-    mid = n // 2
-    for j in range(n):
-        flat[mid * n + j] = 1.0
-    kernel = ImageFilter.Kernel(size=(n, n), kernel=flat, scale=float(n))
-    return np.array(Image.fromarray(img).filter(kernel))
+    blurred = uniform_filter1d(img.astype(np.float32), size=n, axis=1, mode="nearest")
+    return np.clip(blurred, 0, 255).astype(np.uint8)
 
 
 def _defocus_blur(img: np.ndarray, severity: int) -> np.ndarray:
