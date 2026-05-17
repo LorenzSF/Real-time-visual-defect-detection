@@ -318,13 +318,12 @@ class PatchcoreDetector(_TorchWarmupModel):
             num_neighbors=9,
         ).to(self.device)
         model.train()
-        embeddings = []
         for batch in self._iter_batches(frames):
             with torch.no_grad():
-                embeddings.append(model(batch).detach())
-        if not embeddings:
+                model(batch)
+        if len(model.embedding_store) == 0:
             raise RuntimeError("patchcore warmup produced no embeddings")
-        model.subsample_embedding(torch.cat(embeddings, dim=0), 0.1)
+        model.subsample_embedding(sampling_ratio=0.1)
         model.eval()
         self._model = model
         self._ready = True

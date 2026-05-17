@@ -27,7 +27,7 @@ _compile.log
 # Internal files to develop the pipeline:
 PLAN.md
 ARCHITECTURE.md
-BEST_PRACTICES.md
+B_P.md
 *.ipynb
 HPC_KU Leuven.md
 scripts/
