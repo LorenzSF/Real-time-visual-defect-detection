@@ -13,6 +13,10 @@ stream:
 
 warmup:
   warmup_steps: 500        # first N input images used to fit the unsupervised detector
+  fit_epochs: 100          # passes over the warmup buffer. Only consumed by the
+                           # gradient-trained detectors (draem, stfpm, csflow, rd4ad);
+                           # memory-based detectors (pca, patchcore, padim, subspacead,
+                           # efficientad) fit in a single pass and ignore this field.
 
 model:
   name: pca                

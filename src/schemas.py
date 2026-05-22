@@ -85,11 +85,20 @@ class StreamConfig:
 @dataclass(frozen=True)
 class WarmupConfig:
     warmup_steps: int
+    # Number of fit passes over the warmup buffer. Only consumed by the
+    # gradient-trained detectors (draem, stfpm, csflow, rd4ad); memory-based
+    # detectors (pca, patchcore, padim, subspacead, efficientad) fit in a
+    # single pass and ignore this field.
+    fit_epochs: int
 
     def __post_init__(self) -> None:
         if self.warmup_steps <= 0:
             raise ValueError(
                 f"WarmupConfig.warmup_steps must be > 0, got {self.warmup_steps}"
+            )
+        if self.fit_epochs < 1:
+            raise ValueError(
+                f"WarmupConfig.fit_epochs must be >= 1, got {self.fit_epochs}"
             )
 
 

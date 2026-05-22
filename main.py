@@ -234,7 +234,7 @@ def main() -> None:
     print(f"[main] experiment={experiment_name} seed={cfg.seed}")
 
     set_seeds(cfg.seed)
-    model = build_model(cfg.model)
+    model = build_model(cfg.model, cfg.warmup.fit_epochs)
 
     print("[main] warming up model...")
     peak_vram_mb = 0.0

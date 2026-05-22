@@ -28,9 +28,13 @@ _compile.log
 PLAN.md
 ARCHITECTURE.md
 B_P.md
-*.ipynb
+notebooks/
+#notebooks/analyze job*
+#notebooks/benchmark*
+#notebooks/compare*
+#notebooks/run*
+#notebooks/build*
 HPC_KU Leuven.md
 scripts/
 OLD_dashboard.py
 thesis/
-notebooks/

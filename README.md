@@ -78,7 +78,7 @@ Main sections:
 
 - `seed`, `output_dir`, `log_every`
 - `stream`: dataset, input_path, extensions, shuffle, max_frames
-- `warmup`: warmup_steps
+- `warmup`: warmup_steps, fit_epochs
 - `model`: name, backbone, device, checkpoint
 - `corruption`: enabled, specs
 - `metrics`: window_size, threshold_mode, calibration_steps, initial_threshold, pot_risk
@@ -89,6 +89,10 @@ Current implementation notes:
 - `stream.dataset` is a free-form dataset name used in the output dir.
 - Warm-up uses the first `warmup.warmup_steps` images from the configured
   sorted input order.
+- `warmup.fit_epochs` is the number of passes the gradient-trained detectors
+  (`draem`, `stfpm`, `csflow`, `rd4ad`) make over the warm-up buffer. Memory-based
+  detectors (`pca`, `patchcore`, `padim`, `subspacead`, `efficientad`) fit in a
+  single pass and ignore the field.
 - Threshold calibration uses the first `metrics.calibration_steps` post-warmup
   frames from that same sorted order. With `stream.shuffle: true`, only the
   remaining post-calibration stream is shuffled.

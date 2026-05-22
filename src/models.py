@@ -16,7 +16,11 @@ class Model(Protocol):
     def predict(self, frame: Frame) -> Prediction: ...
 
 
-def build_model(cfg: ModelConfig) -> Model:
+def build_model(cfg: ModelConfig, fit_epochs: int) -> Model:
+    """Build a detector. `fit_epochs` is only consumed by the gradient-trained
+    detectors (draem, stfpm, csflow, rd4ad); the memory-based detectors fit in
+    a single pass and ignore it.
+    """
     name = cfg.name.lower()
     if name == "pca":
         return PCADetector(cfg)
@@ -27,13 +31,13 @@ def build_model(cfg: ModelConfig) -> Model:
     if name == "subspacead":
         return SubspaceADDetector(cfg)
     if name in {"stfpm", "anomalib_stfpm"}:
-        return StfpmDetector(cfg)
+        return StfpmDetector(cfg, fit_epochs)
     if name in {"csflow", "anomalib_csflow"}:
-        return CsflowDetector(cfg)
+        return CsflowDetector(cfg, fit_epochs)
     if name in {"draem", "anomalib_draem"}:
-        return DraemDetector(cfg)
+        return DraemDetector(cfg, fit_epochs)
     if name in {"rd4ad", "reverse_distillation"}:
-        return Rd4adDetector(cfg)
+        return Rd4adDetector(cfg, fit_epochs)
     if name == "efficientad":
         return EfficientAdDetector(cfg)
     supported = (
@@ -361,10 +365,11 @@ class PadimDetector(_TorchWarmupModel):
 
 
 class StfpmDetector(_TorchWarmupModel):
-    def __init__(self, cfg: ModelConfig) -> None:
+    def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
         super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
         if cfg.checkpoint is not None:
             raise ValueError("stfpm does not support checkpoint loading in this pipeline")
+        self.fit_epochs = fit_epochs
 
     def fit_warmup(self, frames: Sequence[Frame]) -> None:
         try:
@@ -388,12 +393,13 @@ class StfpmDetector(_TorchWarmupModel):
         )
 
         model.train()
-        for batch in self._iter_batches(frames):
-            optimizer.zero_grad(set_to_none=True)
-            teacher_features, student_features = model(batch)
-            loss = loss_fn(teacher_features, student_features)
-            loss.backward()
-            optimizer.step()
+        for _ in range(self.fit_epochs):
+            for batch in self._iter_batches(frames):
+                optimizer.zero_grad(set_to_none=True)
+                teacher_features, student_features = model(batch)
+                loss = loss_fn(teacher_features, student_features)
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         self._model = model
@@ -402,10 +408,11 @@ class StfpmDetector(_TorchWarmupModel):
 
 
 class CsflowDetector(_TorchWarmupModel):
-    def __init__(self, cfg: ModelConfig) -> None:
+    def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
         super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
         if cfg.checkpoint is not None:
             raise ValueError("csflow does not support checkpoint loading in this pipeline")
+        self.fit_epochs = fit_epochs
 
     def fit_warmup(self, frames: Sequence[Frame]) -> None:
         try:
@@ -434,12 +441,13 @@ class CsflowDetector(_TorchWarmupModel):
         )
 
         model.train()
-        for batch in self._iter_batches(frames):
-            optimizer.zero_grad(set_to_none=True)
-            z_dist, jacobians = model(batch)
-            loss = loss_fn(z_dist, jacobians)
-            loss.backward()
-            optimizer.step()
+        for _ in range(self.fit_epochs):
+            for batch in self._iter_batches(frames):
+                optimizer.zero_grad(set_to_none=True)
+                z_dist, jacobians = model(batch)
+                loss = loss_fn(z_dist, jacobians)
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         self._model = model
@@ -448,10 +456,11 @@ class CsflowDetector(_TorchWarmupModel):
 
 
 class DraemDetector(_TorchWarmupModel):
-    def __init__(self, cfg: ModelConfig) -> None:
+    def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
         super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=False)
         if cfg.checkpoint is not None:
             raise ValueError("draem does not support checkpoint loading in this pipeline")
+        self.fit_epochs = fit_epochs
 
     def fit_warmup(self, frames: Sequence[Frame]) -> None:
         try:
@@ -468,13 +477,14 @@ class DraemDetector(_TorchWarmupModel):
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
         model.train()
-        for batch in self._iter_batches(frames):
-            optimizer.zero_grad(set_to_none=True)
-            augmented_image, anomaly_mask = augmenter(batch)
-            reconstruction, prediction = model(augmented_image)
-            loss = loss_fn(batch, reconstruction, anomaly_mask, prediction)
-            loss.backward()
-            optimizer.step()
+        for _ in range(self.fit_epochs):
+            for batch in self._iter_batches(frames):
+                optimizer.zero_grad(set_to_none=True)
+                augmented_image, anomaly_mask = augmenter(batch)
+                reconstruction, prediction = model(augmented_image)
+                loss = loss_fn(batch, reconstruction, anomaly_mask, prediction)
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         self._model = model
@@ -483,10 +493,11 @@ class DraemDetector(_TorchWarmupModel):
 
 
 class Rd4adDetector(_TorchWarmupModel):
-    def __init__(self, cfg: ModelConfig) -> None:
+    def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
         super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
         if cfg.checkpoint is not None:
             raise ValueError("rd4ad does not support checkpoint loading in this pipeline")
+        self.fit_epochs = fit_epochs
 
     def fit_warmup(self, frames: Sequence[Frame]) -> None:
         try:
@@ -518,12 +529,13 @@ class Rd4adDetector(_TorchWarmupModel):
         )
 
         model.train()
-        for batch in self._iter_batches(frames):
-            optimizer.zero_grad(set_to_none=True)
-            encoder_features, decoder_features = model(batch)
-            loss = loss_fn(encoder_features, decoder_features)
-            loss.backward()
-            optimizer.step()
+        for _ in range(self.fit_epochs):
+            for batch in self._iter_batches(frames):
+                optimizer.zero_grad(set_to_none=True)
+                encoder_features, decoder_features = model(batch)
+                loss = loss_fn(encoder_features, decoder_features)
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         self._model = model
