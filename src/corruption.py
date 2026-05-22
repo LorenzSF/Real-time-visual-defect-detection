@@ -3,7 +3,6 @@ import random
 from typing import Callable, Iterator
 
 import numpy as np
-from PIL import Image, ImageFilter
 from scipy.ndimage import uniform_filter1d
 
 from .schemas import CorruptionConfig, Frame
@@ -61,30 +60,8 @@ def _motion_blur(img: np.ndarray, severity: int) -> np.ndarray:
     return np.clip(blurred, 0, 255).astype(np.uint8)
 
 
-def _defocus_blur(img: np.ndarray, severity: int) -> np.ndarray:
-    radius = [1.0, 2.0, 3.0][severity - 1]
-    pil = Image.fromarray(img).filter(ImageFilter.GaussianBlur(radius=radius))
-    return np.array(pil)
-
-
-def _brightness(img: np.ndarray, severity: int) -> np.ndarray:
-    delta = [0.1, 0.2, 0.3][severity - 1]
-    x = img.astype(np.float32) / 255.0
-    return np.clip((x + delta) * 255.0, 0, 255).astype(np.uint8)
-
-
-def _contrast(img: np.ndarray, severity: int) -> np.ndarray:
-    factor = [0.75, 0.5, 0.4][severity - 1]
-    x = img.astype(np.float32) / 255.0
-    mean = x.mean(axis=(0, 1), keepdims=True)
-    return (np.clip((x - mean) * factor + mean, 0, 1) * 255.0).astype(np.uint8)
-
-
 _CORRUPTIONS: dict[str, Callable[[np.ndarray, int], np.ndarray]] = {
     "gaussian_noise": _gaussian_noise,
     "shot_noise": _shot_noise,
     "motion_blur": _motion_blur,
-    "defocus_blur": _defocus_blur,
-    "brightness": _brightness,
-    "contrast": _contrast,
 }

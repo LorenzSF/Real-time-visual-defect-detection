@@ -19,7 +19,7 @@ Every line of code must serve at least one of these goals:
    same stream, corruption, threshold, and seed settings, then compare their
    `report.json` outputs.
 3. **Robustness under environmental noise.** Measure the effect of synthetic
-   corruptions such as noise, blur, brightness shifts, and contrast loss.
+   corruptions such as Gaussian noise, shot noise, and motion blur.
 
 If code does not support one of these goals, remove it or do not add it.
 

@@ -114,7 +114,7 @@ Current implementation notes:
   (`ssh -L 8765:localhost:8765 user@host`).
 - `metrics.threshold_mode` currently supports `max_score_ok` and `pot`.
 - Supported `corruption.specs[].kind` values are `gaussian_noise`,
-  `shot_noise`, `motion_blur`, `defocus_blur`, `brightness`, and `contrast`.
+  `shot_noise`, and `motion_blur`.
 - Both threshold modes start with `metrics.initial_threshold`, score the first
   `metrics.calibration_steps` post-warmup frames, then switch to the calibrated
   threshold for subsequent frames. `max_score_ok` uses the maximum finite score
