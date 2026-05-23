@@ -1,5 +1,5 @@
 import dataclasses
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union, get_args, get_origin, get_type_hints
 
@@ -241,7 +241,7 @@ class VizConfig:
 
 @dataclass(frozen=True)
 class RunModeConfig:
-    mode: str
+    mode: str = "streaming"
 
     def __post_init__(self) -> None:
         if self.mode not in {"streaming", "offline"}:
@@ -253,12 +253,12 @@ class RunModeConfig:
 
 @dataclass(frozen=True)
 class OfflineSplitConfig:
-    val_ratio: float
-    test_ratio: float
-    stratify: bool
-    train_on_good_only: bool
-    val_balance: str
-    min_train_goods: int
+    val_ratio: float = 0.1
+    test_ratio: float = 0.2
+    stratify: bool = True
+    train_on_good_only: bool = True
+    val_balance: str = "natural"
+    min_train_goods: int = 50
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.val_ratio < 1.0:
@@ -287,8 +287,8 @@ class OfflineSplitConfig:
 
 @dataclass(frozen=True)
 class OfflineThresholdConfig:
-    mode: str
-    target_fpr: float
+    mode: str = "val_f1"
+    target_fpr: float = 0.01
 
     def __post_init__(self) -> None:
         if self.mode not in {"val_f1", "val_quantile"}:
@@ -305,9 +305,9 @@ class OfflineThresholdConfig:
 
 @dataclass(frozen=True)
 class OfflineConfig:
-    experiment_name: str
-    split: OfflineSplitConfig
-    threshold: OfflineThresholdConfig
+    experiment_name: str = "offline"
+    split: OfflineSplitConfig = field(default_factory=OfflineSplitConfig)
+    threshold: OfflineThresholdConfig = field(default_factory=OfflineThresholdConfig)
 
     def __post_init__(self) -> None:
         if not self.experiment_name:
@@ -319,14 +319,14 @@ class RunConfig:
     seed: int
     output_dir: str
     log_every: int
-    run: RunModeConfig
     stream: StreamConfig
     warmup: WarmupConfig
     model: ModelConfig
     corruption: CorruptionConfig
     metrics: MetricsConfig
     visualization: VizConfig
-    offline: OfflineConfig
+    run: RunModeConfig = field(default_factory=RunModeConfig)
+    offline: OfflineConfig = field(default_factory=OfflineConfig)
 
     def __post_init__(self) -> None:
         if not self.output_dir:
