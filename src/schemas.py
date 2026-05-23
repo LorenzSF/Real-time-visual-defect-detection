@@ -17,6 +17,28 @@ class Frame:
 
 
 @dataclass(frozen=True)
+class DatasetEntry:
+    path: str
+    label: int
+    image_id: str
+
+    def __post_init__(self) -> None:
+        if not self.path:
+            raise ValueError("DatasetEntry.path must be non-empty")
+        if self.label not in (-1, 0, 1):
+            raise ValueError(f"DatasetEntry.label must be -1, 0, or 1, got {self.label}")
+        if not self.image_id:
+            raise ValueError("DatasetEntry.image_id must be non-empty")
+
+
+@dataclass(frozen=True)
+class OfflineSplit:
+    train: List[DatasetEntry]
+    val: List[DatasetEntry]
+    test: List[DatasetEntry]
+
+
+@dataclass(frozen=True)
 class Prediction:
     score: float
     anomaly_map: Optional[np.ndarray]
@@ -108,12 +130,22 @@ class ModelConfig:
     backbone: str
     device: str
     checkpoint: Optional[str]
+    image_size: Optional[int] = None
+    batch_size: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ModelConfig.name must be non-empty")
         if not self.device:
             raise ValueError("ModelConfig.device must be non-empty")
+        if self.image_size is not None and self.image_size <= 0:
+            raise ValueError(
+                f"ModelConfig.image_size must be > 0 when set, got {self.image_size}"
+            )
+        if self.batch_size is not None and self.batch_size <= 0:
+            raise ValueError(
+                f"ModelConfig.batch_size must be > 0 when set, got {self.batch_size}"
+            )
 
 
 @dataclass(frozen=True)
@@ -207,17 +239,94 @@ class VizConfig:
             )
 
 
+@dataclass(frozen=True)
+class RunModeConfig:
+    mode: str
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"streaming", "offline"}:
+            raise ValueError(
+                "RunModeConfig.mode must be one of 'streaming', 'offline', "
+                f"got {self.mode!r}"
+            )
+
+
+@dataclass(frozen=True)
+class OfflineSplitConfig:
+    val_ratio: float
+    test_ratio: float
+    stratify: bool
+    train_on_good_only: bool
+    val_balance: str
+    min_train_goods: int
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.val_ratio < 1.0:
+            raise ValueError(
+                f"OfflineSplitConfig.val_ratio must be in [0, 1), got {self.val_ratio}"
+            )
+        if not 0.0 <= self.test_ratio < 1.0:
+            raise ValueError(
+                f"OfflineSplitConfig.test_ratio must be in [0, 1), got {self.test_ratio}"
+            )
+        if self.val_ratio + self.test_ratio >= 1.0:
+            raise ValueError(
+                "OfflineSplitConfig.val_ratio + test_ratio must be < 1"
+            )
+        if self.val_balance not in {"natural"}:
+            raise ValueError(
+                "OfflineSplitConfig.val_balance must be 'natural', "
+                f"got {self.val_balance!r}"
+            )
+        if self.min_train_goods < 0:
+            raise ValueError(
+                "OfflineSplitConfig.min_train_goods must be >= 0, "
+                f"got {self.min_train_goods}"
+            )
+
+
+@dataclass(frozen=True)
+class OfflineThresholdConfig:
+    mode: str
+    target_fpr: float
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"val_f1", "val_quantile"}:
+            raise ValueError(
+                "OfflineThresholdConfig.mode must be one of "
+                f"'val_f1', 'val_quantile', got {self.mode!r}"
+            )
+        if not np.isfinite(self.target_fpr) or not 0.0 < self.target_fpr < 1.0:
+            raise ValueError(
+                "OfflineThresholdConfig.target_fpr must be in (0, 1), "
+                f"got {self.target_fpr}"
+            )
+
+
+@dataclass(frozen=True)
+class OfflineConfig:
+    experiment_name: str
+    split: OfflineSplitConfig
+    threshold: OfflineThresholdConfig
+
+    def __post_init__(self) -> None:
+        if not self.experiment_name:
+            raise ValueError("OfflineConfig.experiment_name must be non-empty")
+
+
 @dataclass
 class RunConfig:
     seed: int
     output_dir: str
     log_every: int
+    run: RunModeConfig
     stream: StreamConfig
     warmup: WarmupConfig
     model: ModelConfig
     corruption: CorruptionConfig
     metrics: MetricsConfig
     visualization: VizConfig
+    offline: OfflineConfig
 
     def __post_init__(self) -> None:
         if not self.output_dir:

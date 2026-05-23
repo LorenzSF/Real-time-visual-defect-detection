@@ -211,6 +211,20 @@ class FrameLogger:
             latency_ms=float(pred.latency_ms),
         )
 
+    def write_prediction(
+        self, frame: Frame, pred: Prediction, threshold: float, phase: str
+    ) -> None:
+        score = float(pred.score)
+        pred_label = _frame_pred_label(score, threshold)
+        self._write_record(
+            frame=frame,
+            phase=phase,
+            score=score if math.isfinite(score) else None,
+            pred_label=pred_label,
+            threshold_used=float(threshold),
+            latency_ms=float(pred.latency_ms),
+        )
+
     def _write_record(
         self,
         *,
@@ -324,6 +338,118 @@ def _exact_aupr(scores: np.ndarray, labels: np.ndarray) -> float:
     if scores.size == 0 or len(np.unique(labels)) < 2:
         return float("nan")
     return float(average_precision_score(labels, scores))
+
+
+def calibrate_offline_threshold(
+    scores: np.ndarray, labels: np.ndarray, mode: str, target_fpr: float
+) -> tuple[float, dict]:
+    scores = np.asarray(scores, dtype=np.float64)
+    labels = np.asarray(labels, dtype=np.int64)
+    finite = np.isfinite(scores)
+    scores = scores[finite]
+    labels = labels[finite]
+    if scores.size == 0 or len(np.unique(labels)) < 2:
+        raise RuntimeError("offline threshold calibration requires finite OK and NG scores")
+
+    if mode == "val_f1":
+        threshold, precision, recall, f1, accuracy = _best_f1_threshold(scores, labels)
+        return threshold, {
+            "mode": mode,
+            "threshold": threshold,
+            "calibrated_on": "validation",
+            "val_precision": precision,
+            "val_recall": recall,
+            "val_f1": f1,
+            "val_accuracy": accuracy,
+            "val_auroc": _exact_auroc(scores, labels),
+            "val_aupr": _exact_aupr(scores, labels),
+            "n_calibration_scores": int(scores.size),
+        }
+
+    if mode == "val_quantile":
+        normal_scores = scores[labels == 0]
+        if normal_scores.size == 0:
+            raise RuntimeError("val_quantile threshold requires at least one OK score")
+        threshold = float(np.quantile(normal_scores, 1.0 - target_fpr))
+        precision, recall, f1, accuracy = _binary_metrics(scores, labels, threshold)
+        return threshold, {
+            "mode": mode,
+            "target_fpr": float(target_fpr),
+            "threshold": threshold,
+            "calibrated_on": "validation_ok_scores",
+            "val_precision": precision,
+            "val_recall": recall,
+            "val_f1": f1,
+            "val_accuracy": accuracy,
+            "val_auroc": _exact_auroc(scores, labels),
+            "val_aupr": _exact_aupr(scores, labels),
+            "n_calibration_scores": int(scores.size),
+        }
+
+    raise ValueError(f"unknown offline threshold mode {mode!r}")
+
+
+def offline_metrics(scores: np.ndarray, labels: np.ndarray, threshold: float) -> dict:
+    scores = np.asarray(scores, dtype=np.float64)
+    labels = np.asarray(labels, dtype=np.int64)
+    finite = np.isfinite(scores)
+    scored = scores[finite]
+    y = labels[finite]
+    precision, recall, f1, accuracy = _binary_metrics(scored, y, threshold)
+    normal_recall = _class_recall(scored, y, threshold, label=0)
+    anomaly_recall = _class_recall(scored, y, threshold, label=1)
+    macro_recall = float(np.mean([normal_recall, anomaly_recall]))
+    return {
+        "n_scored": int(y.size),
+        "n_nonfinite_scores": int(scores.size - y.size),
+        "n_label_normals": int(np.sum(y == 0)),
+        "n_label_anomalies": int(np.sum(y == 1)),
+        "n_predicted_anomalies": int(np.sum(scored >= float(threshold))),
+        "auroc": _exact_auroc(scored, y),
+        "aupr": _exact_aupr(scored, y),
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "accuracy": accuracy,
+        "recall_at_fpr_1pct": _recall_at_fpr(scored, y, 0.01),
+        "recall_at_fpr_5pct": _recall_at_fpr(scored, y, 0.05),
+        "macro_recall": macro_recall,
+        "weighted_recall": accuracy,
+    }
+
+
+def _best_f1_threshold(
+    scores: np.ndarray, labels: np.ndarray
+) -> tuple[float, float, float, float, float]:
+    best: tuple[float, float, float, float, float] | None = None
+    for threshold in np.unique(scores):
+        precision, recall, f1, accuracy = _binary_metrics(scores, labels, float(threshold))
+        cand = (float(threshold), precision, recall, f1, accuracy)
+        if best is None or cand[3] > best[3] or (cand[3] == best[3] and cand[0] > best[0]):
+            best = cand
+    assert best is not None
+    return best
+
+
+def _class_recall(scores: np.ndarray, labels: np.ndarray, threshold: float, label: int) -> float:
+    mask = labels == label
+    if not np.any(mask):
+        return float("nan")
+    pred = (scores >= float(threshold)).astype(np.int64)
+    if label == 0:
+        return float(np.mean(pred[mask] == 0))
+    return float(np.mean(pred[mask] == 1))
+
+
+def _recall_at_fpr(scores: np.ndarray, labels: np.ndarray, target_fpr: float) -> float:
+    if scores.size == 0 or len(np.unique(labels)) < 2:
+        return float("nan")
+    normal_scores = scores[labels == 0]
+    anomaly_scores = scores[labels == 1]
+    if normal_scores.size == 0 or anomaly_scores.size == 0:
+        return float("nan")
+    threshold = float(np.quantile(normal_scores, 1.0 - target_fpr))
+    return float(np.mean(anomaly_scores >= threshold))
 
 
 class _HistogramAUROC:

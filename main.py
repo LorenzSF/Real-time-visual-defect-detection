@@ -15,10 +15,21 @@ import numpy as np
 from scipy.stats import genpareto
 
 from src.corruption import apply_corruption
-from src.metrics import FrameLogger, OnlineMetrics
+from src.metrics import (
+    FrameLogger,
+    OnlineMetrics,
+    calibrate_offline_threshold,
+    offline_metrics,
+)
 from src.models import build_model
-from src.schemas import Frame, RunConfig
-from src.stream import build_stream, build_warmup_stream, warmup
+from src.schemas import DatasetEntry, Frame, RunConfig
+from src.stream import (
+    build_offline_split,
+    build_stream,
+    build_warmup_stream,
+    frames_from_entries,
+    warmup,
+)
 from src.visualization import StreamVisualizer, prediction_projection_vector
 
 
@@ -48,6 +59,61 @@ def save_report(report: dict[str, Any], run_dir: Path) -> Path:
         encoding="utf-8",
     )
     return report_path
+
+
+def _build_model_for_run(cfg: RunConfig) -> tuple[Any, Any | None]:
+    set_seeds(cfg.seed)
+    model = build_model(cfg.model, cfg.warmup.fit_epochs)
+    torch = _reset_peak_vram(cfg.model.device)
+    return model, torch
+
+
+def _reset_peak_vram(model_device: str) -> Any | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    if torch.cuda.is_available() and model_device.startswith("cuda"):
+        torch.cuda.reset_peak_memory_stats()
+    return torch
+
+
+def _peak_vram_mb(torch: Any | None, model_device: str) -> float:
+    if torch is None:
+        return 0.0
+    if torch.cuda.is_available() and model_device.startswith("cuda"):
+        return float(torch.cuda.max_memory_allocated() / (1024.0 * 1024.0))
+    return 0.0
+
+
+def _finalize_report(
+    *,
+    report: dict[str, Any],
+    cfg: RunConfig,
+    run_dir: Path,
+    experiment_name: str,
+    mode: str,
+    runtime: dict[str, Any],
+    threshold: dict[str, Any],
+    evaluation: dict[str, Any],
+) -> Path:
+    report["runtime"] = runtime
+    report["threshold"] = threshold
+    report["evaluation"] = evaluation
+    report["run"] = {
+        "mode": mode,
+        "experiment_name": experiment_name,
+        "seed": cfg.seed,
+    }
+    report["hardware"] = _collect_hardware_info(cfg.model.device)
+    report["stream"] = dataclasses.asdict(cfg.stream)
+    report["warmup"] = dataclasses.asdict(cfg.warmup)
+    report["model"] = dataclasses.asdict(cfg.model)
+    report["corruption"] = dataclasses.asdict(cfg.corruption)
+    if mode == "offline":
+        report["offline"] = dataclasses.asdict(cfg.offline)
+    return save_report(report, run_dir)
 
 
 def _derive_experiment_name(cfg: RunConfig) -> str:
@@ -227,25 +293,15 @@ def _collect_warmup_projection_vectors(
     return np.stack(vecs, axis=0)
 
 
-def main() -> None:
-    cfg = RunConfig.from_yaml("config.yaml")
+def run_streaming(cfg: RunConfig) -> None:
     experiment_name = _derive_experiment_name(cfg)
     run_dir = build_run_dir(cfg.output_dir, experiment_name)
     print(f"[main] experiment={experiment_name} seed={cfg.seed}")
 
-    set_seeds(cfg.seed)
-    model = build_model(cfg.model, cfg.warmup.fit_epochs)
+    model, torch = _build_model_for_run(cfg)
 
     print("[main] warming up model...")
-    peak_vram_mb = 0.0
     cold_start_t0 = time.perf_counter()
-    try:
-        import torch
-
-        if torch.cuda.is_available() and cfg.model.device.startswith("cuda"):
-            torch.cuda.reset_peak_memory_stats()
-    except ImportError:
-        torch = None
     set_seeds(cfg.seed)
     warmup_stream = build_warmup_stream(cfg.stream, cfg.warmup.warmup_steps)
     warmup_frames = warmup(model, warmup_stream, cfg.warmup)
@@ -351,36 +407,202 @@ def main() -> None:
         )
 
     report = metrics.finalize()
-    if (
-        torch is not None
-        and torch.cuda.is_available()
-        and cfg.model.device.startswith("cuda")
-    ):
-        peak_vram_mb = float(torch.cuda.max_memory_allocated() / (1024.0 * 1024.0))
-    report["runtime"] = {
-        "cold_start_s": cold_start_s,
-        "peak_vram_mb": peak_vram_mb,
-    }
-    report["threshold"] = threshold_report
-    report["evaluation"] = {
-        "metrics_start": "after_threshold_calibration",
-        "warmup_frames_excluded": len(warmup_frames),
-        "threshold_calibration_frames_excluded": calibration_seen,
-        "starts_at_stream_frame": evaluation_start_frame,
-        "n_evaluation_frames": report["n_seen"],
-    }
-    report["run"] = {
-        "experiment_name": experiment_name,
-        "seed": cfg.seed,
-    }
-    report["hardware"] = _collect_hardware_info(cfg.model.device)
-    report["stream"] = dataclasses.asdict(cfg.stream)
-    report["warmup"] = dataclasses.asdict(cfg.warmup)
-    report["model"] = dataclasses.asdict(cfg.model)
-    report["corruption"] = dataclasses.asdict(cfg.corruption)
-    report_path = save_report(report, run_dir)
+    report_path = _finalize_report(
+        report=report,
+        cfg=cfg,
+        run_dir=run_dir,
+        experiment_name=experiment_name,
+        mode="streaming",
+        runtime={
+            "cold_start_s": cold_start_s,
+            "peak_vram_mb": _peak_vram_mb(torch, cfg.model.device),
+        },
+        threshold=threshold_report,
+        evaluation={
+            "metrics_start": "after_threshold_calibration",
+            "warmup_frames_excluded": len(warmup_frames),
+            "threshold_calibration_frames_excluded": calibration_seen,
+            "starts_at_stream_frame": evaluation_start_frame,
+            "n_evaluation_frames": report["n_seen"],
+        },
+    )
     viz.close()
     print(f"[main] done: {report_path}")
+
+
+_OFFLINE_MODELS = {
+    "patchcore",
+    "anomalib_patchcore",
+    "padim",
+    "anomalib_padim",
+    "subspacead",
+    "stfpm",
+    "anomalib_stfpm",
+    "csflow",
+    "anomalib_csflow",
+    "draem",
+    "anomalib_draem",
+    "rd4ad",
+    "reverse_distillation",
+}
+
+
+def run_offline(cfg: RunConfig) -> None:
+    if cfg.corruption.enabled:
+        raise ValueError("offline mode does not apply corruptions; disable corruption.enabled")
+
+    model_name = cfg.model.name.lower()
+    if model_name not in _OFFLINE_MODELS:
+        raise ValueError(
+            f"offline mode supports only experiment models, got {cfg.model.name!r}"
+        )
+
+    input_name = Path(cfg.stream.input_path).name
+    experiment_name = "_".join(
+        [
+            cfg.offline.experiment_name,
+            cfg.model.name,
+            cfg.stream.dataset,
+            input_name,
+            time.strftime("%Y%m%d-%H%M%S"),
+        ]
+    )
+    run_dir = build_run_dir(cfg.output_dir, experiment_name)
+    print(f"[main] mode=offline experiment={experiment_name} seed={cfg.seed}")
+
+    set_seeds(cfg.seed)
+    split = build_offline_split(cfg.stream, cfg.offline.split, cfg.seed)
+    print(
+        "[main] offline split: "
+        f"train={len(split.train)} val={len(split.val)} test={len(split.test)}"
+    )
+
+    model, torch = _build_model_for_run(cfg)
+
+    fit_t0 = time.perf_counter()
+    train_frames = list(frames_from_entries(split.train))
+    if not hasattr(model, "fit_warmup"):
+        raise TypeError(f"model {type(model).__name__} has no fit_warmup() method")
+    model.fit_warmup(train_frames)
+    fit_seconds = time.perf_counter() - fit_t0
+
+    with FrameLogger(run_dir / "frames.jsonl") as frames_log:
+        for frame in train_frames:
+            frames_log.write_warmup(frame)
+
+        val_rows, val_predict_seconds = _predict_entries(model, split.val)
+        val_scores, val_labels = _score_arrays(val_rows)
+        threshold, threshold_report = calibrate_offline_threshold(
+            val_scores,
+            val_labels,
+            cfg.offline.threshold.mode,
+            cfg.offline.threshold.target_fpr,
+        )
+        _add_threshold_to_rows(val_rows, threshold)
+        _write_prediction_rows(run_dir / "validation_predictions.jsonl", val_rows)
+
+        test_rows, test_predict_seconds = _predict_entries(
+            model, split.test, frames_log, threshold
+        )
+        _write_prediction_rows(run_dir / "predictions.jsonl", test_rows)
+
+    test_scores, test_labels = _score_arrays(test_rows)
+    report = offline_metrics(test_scores, test_labels, threshold)
+    report["n_seen"] = len(test_rows)
+    report["n_anomalies"] = report["n_predicted_anomalies"]
+    report["labels_available"] = True
+    report["threshold_mode"] = cfg.offline.threshold.mode
+    report["threshold_used"] = float(threshold)
+    latencies = np.asarray([row["latency_ms"] for row in test_rows], dtype=np.float64)
+    report["mean_latency_ms"] = float(np.mean(latencies)) if latencies.size else 0.0
+    report["p95_latency_ms"] = float(np.quantile(latencies, 0.95)) if latencies.size else 0.0
+    report["throughput_fps"] = (
+        len(test_rows) / test_predict_seconds if test_predict_seconds > 0 else 0.0
+    )
+    report_path = _finalize_report(
+        report=report,
+        cfg=cfg,
+        run_dir=run_dir,
+        experiment_name=experiment_name,
+        mode="offline",
+        runtime={
+            "fit_seconds": fit_seconds,
+            "val_predict_seconds": val_predict_seconds,
+            "test_predict_seconds": test_predict_seconds,
+            "peak_vram_mb": _peak_vram_mb(torch, cfg.model.device),
+        },
+        threshold=threshold_report,
+        evaluation={
+            "mode": "offline_train_val_test",
+            "train_samples": len(split.train),
+            "val_samples": len(split.val),
+            "test_samples": len(split.test),
+            "n_evaluation_frames": len(test_rows),
+        },
+    )
+    print(f"[main] done: {report_path}")
+
+
+def _predict_entries(
+    model,
+    entries: list[DatasetEntry],
+    frames_log: FrameLogger | None = None,
+    threshold: float | None = None,
+) -> tuple[list[dict[str, Any]], float]:
+    rows: list[dict[str, Any]] = []
+    t0 = time.perf_counter()
+    for frame in frames_from_entries(entries):
+        pred = model.predict(frame)
+        score = float(pred.score)
+        row = {
+            "idx": int(frame.index),
+            "image_id": frame.image_id,
+            "path": frame.source_id,
+            "label": int(frame.label),
+            "score": score if math.isfinite(score) else None,
+            "latency_ms": float(pred.latency_ms),
+        }
+        if threshold is not None:
+            row["threshold_used"] = float(threshold)
+            row["pred_label"] = int(score >= float(threshold)) if math.isfinite(score) else -1
+        rows.append(row)
+        if frames_log is not None and threshold is not None:
+            frames_log.write_prediction(frame, pred, threshold, "evaluation")
+    return rows, time.perf_counter() - t0
+
+
+def _score_arrays(rows: list[dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+    scores = [
+        float(row["score"]) if row["score"] is not None else float("nan")
+        for row in rows
+    ]
+    labels = [int(row["label"]) for row in rows]
+    return np.asarray(scores, dtype=np.float64), np.asarray(labels, dtype=np.int64)
+
+
+def _add_threshold_to_rows(rows: list[dict[str, Any]], threshold: float) -> None:
+    for row in rows:
+        score = row["score"]
+        row["threshold_used"] = float(threshold)
+        row["pred_label"] = (
+            int(float(score) >= float(threshold)) if score is not None else -1
+        )
+
+
+def _write_prediction_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(_jsonify(row), sort_keys=True) + "\n")
+
+
+def main() -> None:
+    cfg = RunConfig.from_yaml("config.yaml")
+    if cfg.run.mode == "streaming":
+        run_streaming(cfg)
+    elif cfg.run.mode == "offline":
+        run_offline(cfg)
+    else:
+        raise ValueError(f"unknown run mode {cfg.run.mode!r}")
 
 
 if __name__ == "__main__":

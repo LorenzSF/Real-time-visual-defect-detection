@@ -8,7 +8,14 @@ import numpy as np
 from PIL import Image
 
 from .models import Model
-from .schemas import Frame, StreamConfig, WarmupConfig
+from .schemas import (
+    DatasetEntry,
+    Frame,
+    OfflineSplit,
+    OfflineSplitConfig,
+    StreamConfig,
+    WarmupConfig,
+)
 
 
 Entry = Tuple[Path, int, str]
@@ -71,6 +78,103 @@ def warmup(model: Model, stream: Iterator[Frame], cfg: WarmupConfig) -> List[Fra
         )
     model.fit_warmup(frames)
     return frames
+
+
+def discover_dataset_entries(cfg: StreamConfig) -> List[DatasetEntry]:
+    return [
+        DatasetEntry(path=str(path), label=label, image_id=image_id)
+        for path, label, image_id in _discover_input_images(cfg)
+    ]
+
+
+def build_offline_split(
+    cfg: StreamConfig, split_cfg: OfflineSplitConfig, seed: int
+) -> OfflineSplit:
+    entries = discover_dataset_entries(cfg)
+    if cfg.max_frames is not None:
+        entries = entries[: cfg.max_frames]
+
+    unknown = [entry.image_id for entry in entries if entry.label not in (0, 1)]
+    if unknown:
+        sample = ", ".join(unknown[:5])
+        raise ValueError(
+            "offline mode requires every image to have an OK/NG label in labels.json; "
+            f"first missing labels: {sample}"
+        )
+
+    if split_cfg.stratify:
+        ok_entries = [entry for entry in entries if entry.label == 0]
+        ng_entries = [entry for entry in entries if entry.label == 1]
+        ok_train, ok_val, ok_test = _split_group(ok_entries, split_cfg, seed)
+        ng_train, ng_val, ng_test = _split_group(ng_entries, split_cfg, seed + 1)
+        if split_cfg.train_on_good_only:
+            train = ok_train
+            test = ng_train + ok_test + ng_test
+        else:
+            train = ok_train + ng_train
+            test = ok_test + ng_test
+        val = ok_val + ng_val
+    else:
+        train, val, test = _split_group(entries, split_cfg, seed)
+        if split_cfg.train_on_good_only:
+            rejected = [entry for entry in train if entry.label == 1]
+            train = [entry for entry in train if entry.label == 0]
+            test = rejected + test
+
+    train_goods = sum(1 for entry in train if entry.label == 0)
+    if train_goods < split_cfg.min_train_goods:
+        raise RuntimeError(
+            "offline split has fewer OK train samples than requested: "
+            f"{train_goods} < {split_cfg.min_train_goods}"
+        )
+    if not train or not val or not test:
+        raise RuntimeError(
+            "offline split produced an empty train, val, or test split "
+            f"(train={len(train)}, val={len(val)}, test={len(test)})"
+        )
+    if not _has_both_labels(val):
+        raise RuntimeError("offline validation split must contain both OK and NG labels")
+    if not _has_both_labels(test):
+        raise RuntimeError("offline test split must contain both OK and NG labels")
+
+    return OfflineSplit(
+        train=sorted(train, key=lambda entry: entry.path),
+        val=sorted(val, key=lambda entry: entry.path),
+        test=sorted(test, key=lambda entry: entry.path),
+    )
+
+
+def frames_from_entries(entries: List[DatasetEntry]) -> Iterator[Frame]:
+    for index, entry in enumerate(entries):
+        yield Frame(
+            image=_load_image(Path(entry.path)),
+            label=entry.label,
+            timestamp=time.time(),
+            source_id=entry.path,
+            image_id=entry.image_id,
+            index=index,
+        )
+
+
+def _split_group(
+    entries: List[DatasetEntry], split_cfg: OfflineSplitConfig, seed: int
+) -> tuple[List[DatasetEntry], List[DatasetEntry], List[DatasetEntry]]:
+    shuffled = list(entries)
+    random.Random(seed).shuffle(shuffled)
+    n_total = len(shuffled)
+    n_val = int(round(n_total * split_cfg.val_ratio))
+    n_test = int(round(n_total * split_cfg.test_ratio))
+    n_val = min(n_val, n_total)
+    n_test = min(n_test, max(0, n_total - n_val))
+    val = shuffled[:n_val]
+    test = shuffled[n_val : n_val + n_test]
+    train = shuffled[n_val + n_test :]
+    return train, val, test
+
+
+def _has_both_labels(entries: List[DatasetEntry]) -> bool:
+    labels = {entry.label for entry in entries}
+    return 0 in labels and 1 in labels
 
 
 def _yield_frames(entries: List[Entry]) -> Iterator[Frame]:

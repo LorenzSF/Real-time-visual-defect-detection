@@ -2,6 +2,9 @@ seed: 42
 output_dir: C:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection/data/outputs
 log_every: 50
 
+run:
+  mode: streaming  # streaming | offline
+
 stream:
   dataset: real_iad
   input_path: data/Croissant_dataset/data_vandemoortele_crops
@@ -23,6 +26,8 @@ model:
   backbone: ''             
   device: cpu             
   checkpoint: null
+  image_size: 512
+  batch_size: 8
 
 corruption:
   enabled: false
@@ -46,3 +51,16 @@ visualization:
   dashboard_host: 127.0.0.1           # bind address; 0.0.0.0 to expose on LAN
   dashboard_port: 8765                # http port for the dashboard
   dashboard_max_live_points: 12000    # ring-buffer size for live embedding points
+
+offline:
+  experiment_name: Experiment 1_v1
+  split:
+    val_ratio: 0.1
+    test_ratio: 0.2
+    stratify: true
+    train_on_good_only: true
+    val_balance: natural
+    min_train_goods: 50
+  threshold:
+    mode: val_f1
+    target_fpr: 0.01

@@ -92,6 +92,14 @@ def _as_float(value: Any, default: float) -> float:
     return float(arr.reshape(-1)[0])
 
 
+def _cfg_image_size(cfg: ModelConfig, default: int) -> int:
+    return cfg.image_size if cfg.image_size is not None else default
+
+
+def _cfg_batch_size(cfg: ModelConfig, default: int) -> int:
+    return cfg.batch_size if cfg.batch_size is not None else default
+
+
 def _pool_to_vector(output: Any) -> Optional[np.ndarray]:
     """Flatten any tensor / dict / list / tuple of tensors into a single 1D
     embedding via spatial mean pooling.
@@ -304,7 +312,12 @@ class _TorchWarmupModel:
 
 class PatchcoreDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=True,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("patchcore does not support checkpoint loading in this pipeline")
 
@@ -336,7 +349,12 @@ class PatchcoreDetector(_TorchWarmupModel):
 
 class PadimDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=True,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("padim does not support checkpoint loading in this pipeline")
 
@@ -366,7 +384,12 @@ class PadimDetector(_TorchWarmupModel):
 
 class StfpmDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=True,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("stfpm does not support checkpoint loading in this pipeline")
         self.fit_epochs = fit_epochs
@@ -409,7 +432,12 @@ class StfpmDetector(_TorchWarmupModel):
 
 class CsflowDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=True,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("csflow does not support checkpoint loading in this pipeline")
         self.fit_epochs = fit_epochs
@@ -457,7 +485,12 @@ class CsflowDetector(_TorchWarmupModel):
 
 class DraemDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=False)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=False,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("draem does not support checkpoint loading in this pipeline")
         self.fit_epochs = fit_epochs
@@ -494,7 +527,12 @@ class DraemDetector(_TorchWarmupModel):
 
 class Rd4adDetector(_TorchWarmupModel):
     def __init__(self, cfg: ModelConfig, fit_epochs: int) -> None:
-        super().__init__(cfg, image_size=512, batch_size=8, imagenet_normalize=True)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 512),
+            batch_size=_cfg_batch_size(cfg, 8),
+            imagenet_normalize=True,
+        )
         if cfg.checkpoint is not None:
             raise ValueError("rd4ad does not support checkpoint loading in this pipeline")
         self.fit_epochs = fit_epochs
@@ -544,8 +582,6 @@ class Rd4adDetector(_TorchWarmupModel):
 
 
 class SubspaceADDetector:
-    GRID = 512
-
     def __init__(self, cfg: ModelConfig) -> None:
         if cfg.checkpoint is not None:
             raise ValueError(
@@ -555,6 +591,8 @@ class SubspaceADDetector:
         self.cfg = cfg
         self.device = cfg.device
         self.model_ckpt = cfg.backbone or "facebook/dinov2-with-registers-large"
+        self.image_size = _cfg_image_size(cfg, 512)
+        self.batch_size = _cfg_batch_size(cfg, 4)
         self._processor = None
         self._model = None
         self._pca = None
@@ -622,7 +660,7 @@ class SubspaceADDetector:
             images=pil_images,
             return_tensors="pt",
             do_resize=True,
-            size={"height": self.GRID, "width": self.GRID},
+            size={"height": self.image_size, "width": self.image_size},
             do_center_crop=False,
         ).to(self.device)
         with torch.no_grad():
@@ -648,7 +686,12 @@ class EfficientAdDetector(_TorchWarmupModel):
     """
 
     def __init__(self, cfg: ModelConfig) -> None:
-        super().__init__(cfg, image_size=256, batch_size=1, imagenet_normalize=False)
+        super().__init__(
+            cfg,
+            image_size=_cfg_image_size(cfg, 256),
+            batch_size=_cfg_batch_size(cfg, 1),
+            imagenet_normalize=False,
+        )
         if cfg.checkpoint is None:
             raise ValueError(
                 "efficientad requires ModelConfig.checkpoint in the current flat pipeline"

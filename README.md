@@ -77,12 +77,14 @@ data/
 Main sections:
 
 - `seed`, `output_dir`, `log_every`
+- `run`: `mode` is `streaming` or `offline`
 - `stream`: dataset, input_path, extensions, shuffle, max_frames
 - `warmup`: warmup_steps, fit_epochs
-- `model`: name, backbone, device, checkpoint
+- `model`: name, backbone, device, checkpoint, image_size, batch_size
 - `corruption`: enabled, specs
 - `metrics`: window_size, threshold_mode, calibration_steps, initial_threshold, pot_risk
 - `visualization`: mode, every_n_frames, overlay_alpha, dashboard_enabled, dashboard_host, dashboard_port, dashboard_max_live_points
+- `offline`: train/val/test split and validation-threshold settings for offline runs
 
 Current implementation notes:
 
@@ -97,6 +99,7 @@ Current implementation notes:
   frames from that same sorted order. With `stream.shuffle: true`, only the
   remaining post-calibration stream is shuffled.
 - `model.name` supports `pca`, `patchcore`, `padim`, `subspacead`, `stfpm`, `csflow`, `draem`, `rd4ad`, and `efficientad`.
+- `model.image_size` and `model.batch_size` override detector defaults where the detector uses image tensors.
 - `efficientad` currently expects `model.checkpoint` to point to trained weights.
 - `visualization.mode: file` is the default path.
 - `visualization.dashboard_enabled: true` runs a FastAPI + WebSocket
@@ -113,6 +116,7 @@ Current implementation notes:
   HPC node, use SSH local port forwarding
   (`ssh -L 8765:localhost:8765 user@host`).
 - `metrics.threshold_mode` currently supports `max_score_ok` and `pot`.
+- `offline.threshold.mode` supports `val_f1` and `val_quantile`; Experiment 1 V1 uses `val_f1`.
 - Supported `corruption.specs[].kind` values are `gaussian_noise`,
   `shot_noise`, and `motion_blur`.
 - Both threshold modes start with `metrics.initial_threshold`, score the first
@@ -139,6 +143,13 @@ Reports are written under `output_dir/<experiment_name>/report.json`. The
 experiment name is derived per run from
 `{model.name}_{stream.dataset}_{input_folder}_{corruption_kind}_s{severity}_{YYYYMMDD-HHMMSS}`,
 omitting the corruption block when `corruption.enabled` is false.
+
+When `run.mode: offline`, `main.py` reads the same flat input folder and
+`labels.json`, builds a deterministic train/val/test split, fits on train,
+calibrates the threshold on val, and evaluates on test. Offline mode supports
+the experiment models only: PatchCore, PaDiM, SubspaceAD, STFPM, CSFlow, DRAEM,
+and RD4AD. It writes `report.json`, `frames.jsonl`, `validation_predictions.jsonl`,
+and `predictions.jsonl` in the run directory.
 
 Current per-run report fields include:
 
