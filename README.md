@@ -93,14 +93,13 @@ Current implementation notes:
   sorted input order.
 - `warmup.fit_epochs` is the number of passes the gradient-trained detectors
   (`draem`, `stfpm`, `csflow`, `rd4ad`) make over the warm-up buffer. Memory-based
-  detectors (`pca`, `patchcore`, `padim`, `subspacead`, `efficientad`) fit in a
-  single pass and ignore the field.
+  detectors (`pca`, `patchcore`, `padim`, `subspacead`) fit in a single pass and
+  ignore the field.
 - Threshold calibration uses the first `metrics.calibration_steps` post-warmup
   frames from that same sorted order. With `stream.shuffle: true`, only the
   remaining post-calibration stream is shuffled.
-- `model.name` supports `pca`, `patchcore`, `padim`, `subspacead`, `stfpm`, `csflow`, `draem`, `rd4ad`, and `efficientad`.
+- `model.name` supports `pca`, `patchcore`, `padim`, `subspacead`, `stfpm`, `csflow`, `draem`, and `rd4ad`.
 - `model.image_size` and `model.batch_size` override detector defaults where the detector uses image tensors.
-- `efficientad` currently expects `model.checkpoint` to point to trained weights.
 - `visualization.mode: file` is the default path.
 - `visualization.dashboard_enabled: true` runs a FastAPI + WebSocket
   server in a daemon thread alongside `main.py`. Open

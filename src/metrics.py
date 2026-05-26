@@ -102,7 +102,7 @@ class OnlineMetrics:
         return MetricSnapshot(
             n_seen=self._n_seen,
             n_anomalies=self._n_anomalies,
-            auroc=global_auroc if not math.isnan(global_auroc) else window_auroc,
+            auroc=window_auroc if not math.isnan(window_auroc) else global_auroc,
             f1=f1,
             mean_latency_ms=mean_lat,
             p95_latency_ms=p95,

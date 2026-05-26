@@ -109,8 +109,8 @@ class WarmupConfig:
     warmup_steps: int
     # Number of fit passes over the warmup buffer. Only consumed by the
     # gradient-trained detectors (draem, stfpm, csflow, rd4ad); memory-based
-    # detectors (pca, patchcore, padim, subspacead, efficientad) fit in a
-    # single pass and ignore this field.
+    # detectors (pca, patchcore, padim, subspacead) fit in a single pass and
+    # ignore this field.
     fit_epochs: int
 
     def __post_init__(self) -> None:

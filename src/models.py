@@ -38,11 +38,9 @@ def build_model(cfg: ModelConfig, fit_epochs: int) -> Model:
         return DraemDetector(cfg, fit_epochs)
     if name in {"rd4ad", "reverse_distillation"}:
         return Rd4adDetector(cfg, fit_epochs)
-    if name == "efficientad":
-        return EfficientAdDetector(cfg)
     supported = (
         "pca, patchcore, padim, subspacead, stfpm, csflow, draem, rd4ad, "
-        "reverse_distillation, efficientad"
+        "reverse_distillation"
     )
     raise ValueError(f"unknown model '{cfg.name}' (supported: {supported})")
 
@@ -211,23 +209,6 @@ def _extract_heatmap(output: Any) -> Optional[np.ndarray]:
         if isinstance(output, dict) and attr in output:
             return _as_heatmap(output[attr])
     return None
-
-
-def _load_state_dict(model: Any, checkpoint: str) -> None:
-    torch = _require_torch()
-    payload = torch.load(checkpoint, map_location="cpu")
-    if isinstance(payload, dict):
-        if "state_dict" in payload and isinstance(payload["state_dict"], dict):
-            payload = payload["state_dict"]
-        elif "model" in payload and isinstance(payload["model"], dict):
-            payload = payload["model"]
-    if not isinstance(payload, dict):
-        raise ValueError(f"unsupported checkpoint payload in {checkpoint}")
-    cleaned = {}
-    for key, value in payload.items():
-        new_key = key[6:] if key.startswith("model.") else key
-        cleaned[new_key] = value
-    model.load_state_dict(cleaned, strict=False)
 
 
 class _TorchWarmupModel:
@@ -676,48 +657,6 @@ class SubspaceADDetector:
         spatial = fused.reshape(b, side, side, c).cpu().numpy().astype(np.float32)
         cls_tokens = hidden_states[layers[0]][:, 0, :].cpu().numpy().astype(np.float32)
         return spatial, cls_tokens
-
-
-class EfficientAdDetector(_TorchWarmupModel):
-    """Checkpoint-backed EfficientAD wrapper.
-
-    With the current flat schema we keep this model inference-only: it expects
-    `ModelConfig.checkpoint` to point to a trained state dict.
-    """
-
-    def __init__(self, cfg: ModelConfig) -> None:
-        super().__init__(
-            cfg,
-            image_size=_cfg_image_size(cfg, 256),
-            batch_size=_cfg_batch_size(cfg, 1),
-            imagenet_normalize=False,
-        )
-        if cfg.checkpoint is None:
-            raise ValueError(
-                "efficientad requires ModelConfig.checkpoint in the current flat pipeline"
-            )
-
-    def fit_warmup(self, frames: Sequence[Frame]) -> None:
-        del frames
-        try:
-            from anomalib.models.image.efficient_ad.torch_model import (
-                EfficientAdModel,
-                EfficientAdModelSize,
-            )
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("efficientad requires anomalib and torch dependencies") from exc
-
-        model = EfficientAdModel(
-            teacher_out_channels=384,
-            model_size=EfficientAdModelSize.S,
-            padding=False,
-            pad_maps=True,
-        ).to(self.device)
-        _load_state_dict(model, str(self.cfg.checkpoint))
-        model.eval()
-        self._model = model
-        self._ready = True
-        self._register_embedding_hook(getattr(model, "student", None))
 
 
 class PCADetector:
