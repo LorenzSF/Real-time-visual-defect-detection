@@ -137,11 +137,13 @@ def build_offline_split(
     if not _has_both_labels(test):
         raise RuntimeError("offline test split must contain both OK and NG labels")
 
-    return OfflineSplit(
-        train=sorted(train, key=lambda entry: entry.path),
-        val=sorted(val, key=lambda entry: entry.path),
-        test=sorted(test, key=lambda entry: entry.path),
-    )
+    train_split = list(train)
+    val_split = list(val)
+    test_split = list(test)
+    random.Random(seed + 100).shuffle(train_split)
+    random.Random(seed + 101).shuffle(val_split)
+    random.Random(seed + 102).shuffle(test_split)
+    return OfflineSplit(train=train_split, val=val_split, test=test_split)
 
 
 def frames_from_entries(entries: List[DatasetEntry]) -> Iterator[Frame]:

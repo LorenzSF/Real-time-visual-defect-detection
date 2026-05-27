@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from .schemas import Frame, MetricSnapshot, Prediction, VizConfig
 
@@ -57,7 +57,7 @@ HTML_PAGE = """<!doctype html>
 html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Computer Modern Bright", "CMU Bright", sans-serif;
   background: var(--bg);
   color: var(--ink);
   font-size: 14px;
@@ -215,7 +215,7 @@ const COLOR_LATEST_BORDER = '#172033';
 const PLOT_LAYOUT = {
   paper_bgcolor: '#ffffff',
   plot_bgcolor: '#ffffff',
-  font: { color: '#172033', family: 'Segoe UI, sans-serif', size: 11 },
+  font: { color: '#172033', family: 'Computer Modern Bright, CMU Bright, sans-serif', size: 11 },
   margin: { l: 36, r: 16, t: 8, b: 32 },
   xaxis: { gridcolor: '#d9dee7', zerolinecolor: '#d9dee7' },
   yaxis: { gridcolor: '#d9dee7', zerolinecolor: '#d9dee7' },
@@ -848,9 +848,29 @@ def _compose(
         f"auroc={snap.auroc:.3f} f1={snap.f1:.3f} "
         f"p95={snap.p95_latency_ms:.1f}ms fps={snap.throughput_fps:.1f}"
     )
-    draw.rectangle((0, 0, img.width, 18), fill=(0, 0, 0))
-    draw.text((4, 2), text, fill=(255, 255, 255))
+    font = _figure_font(12)
+    text_box = draw.textbbox((4, 2), text, font=font)
+    bar_height = max(18, text_box[3] + 4)
+    draw.rectangle((0, 0, img.width, bar_height), fill=(0, 0, 0))
+    draw.text((4, 2), text, fill=(255, 255, 255), font=font)
     return np.array(img)
+
+
+def _figure_font(size: int) -> ImageFont.ImageFont:
+    for candidate in (
+        "Computer Modern Bright.ttf",
+        "CMU Bright.ttf",
+        "cmunbmr.ttf",
+        "cmbr10.ttf",
+    ):
+        try:
+            font = ImageFont.truetype(candidate, size=size)
+        except OSError:
+            continue
+        name = " ".join(font.getname()).lower()
+        if ("computer modern" in name or "cmu" in name) and "bright" in name:
+            return font
+    return ImageFont.load_default()
 
 
 def _heatmap(amap: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
