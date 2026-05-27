@@ -20,11 +20,7 @@ Contact: `lorenzostefano.fresca@student.kuleuven.be` or
 This software was developed as part of a master's thesis in the Advanced Master
 of Artificial Intelligence in Business and Industry at KU Leuven.
 
-Thesis title: "Evaluation of unsupervised defect detection models on industrial
-data streams under corruption".
-
-Supervisor: Prof. M. Verbeke
-
+Supervisor: Prof. Mathias Verbeke
 Daily supervisor: Matthias De Ryck
 
 ## Install
