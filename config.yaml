@@ -1,66 +1,72 @@
-seed: 42
-output_dir: C:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection/data/outputs
-log_every: 50
+# Global inputs
+seed: 42  # int; seed for random, numpy, and torch when available
+output_dir: C:/Users/Usuario/Desktop/Thesis/Pipeline/Real-time-visual-defect-detection/data/outputs  # output folder path
+log_every: 50  # int > 0; print streaming metrics every N evaluated frames
 
 run:
-  mode: streaming  # streaming | offline
+  mode: streaming  # options: streaming | offline
 
 stream:
-  dataset: real_iad
-  input_path: data/Croissant_dataset/data_vandemoortele_crops
-  extensions:
+  dataset: real_iad  # free-form name used in experiment/run names
+  input_path: data/Croissant_dataset/data_vandemoortele_crops  # flat image folder; no subfolders
+  extensions:  # list of file extensions; each must start with "."
     - .jpg
     - .jpeg
-  shuffle: true
-  max_frames: null   # null = full stream
+  shuffle: true  # options: true | false; warmup/calibration prefixes remain sorted
+  max_frames: null  # options: null = full stream | int > 0
 
 warmup:
-  warmup_steps: 500        # first N input images used to fit the unsupervised detector
-  fit_epochs: 100          # passes over the warmup buffer. Only consumed by the
-                           # gradient-trained detectors (draem, stfpm, csflow, rd4ad);
-                           # memory-based detectors (pca, patchcore, padim, subspacead)
-                           # fit in a single pass and ignore this field.
+  warmup_steps: 500  # int > 0; first N sorted images used to fit the detector
+  fit_epochs: 100  # int >= 1; used by draem/stfpm/csflow/rd4ad, ignored by pca/patchcore/padim/subspacead
 
 model:
-  name: pca                
-  backbone: ''             
-  device: cpu             
-  checkpoint: null
-  image_size: 512
-  batch_size: 8
+  # Streaming options: pca | patchcore | anomalib_patchcore | padim | anomalib_padim |
+  # subspacead | stfpm | anomalib_stfpm | csflow | anomalib_csflow |
+  # draem | anomalib_draem | rd4ad | reverse_distillation
+  # Offline options: same list except pca.
+  name: pca
+  # Options: "" = model default; patchcore/rd4ad default wide_resnet50_2;
+  # padim/stfpm default resnet18; subspacead default facebook/dinov2-with-registers-large;
+  # pca/csflow/draem ignore this field.
+  backbone: ''
+  device: cpu  # options depend on torch runtime: cpu | cuda | cuda:0 | cuda:<index>
+  checkpoint: null  # currently supported value: null; implemented detectors reject checkpoint loading
+  image_size: 512  # options: null = detector default | int > 0; ignored by pca
+  batch_size: 8  # options: null = detector default | int > 0; ignored by pca
 
 corruption:
-  enabled: false
-  specs:
-    - kind: gaussian_noise
-      severity: 3
-      probability: 1.0
+  enabled: false  # options: true | false; offline mode requires false
+  specs:  # applied in order when enabled; each spec is sampled independently per frame
+    - kind: gaussian_noise  # options: gaussian_noise | shot_noise | motion_blur
+      severity: 3  # options: 1 | 2 | 3
+      probability: 1.0  # float in [0, 1]
 
 metrics:
-  window_size: 500
-  threshold_mode: max_score_ok  # max_score_ok | pot
-  calibration_steps: 500    # first N post-warmup frames; keep OK-only for max_score_ok
-  initial_threshold: 0.8    # used until threshold calibration is ready
-  pot_risk: 1.0e-3          # target false-positive rate for POT (Siffer et al. 2017)
+  window_size: 500  # int > 0; rolling window for online labelled metrics
+  threshold_mode: max_score_ok  # options: max_score_ok | pot
+  calibration_steps: 500  # int > 0; first N post-warmup frames used for threshold calibration
+  initial_threshold: 0.8  # finite float; used until calibration switches threshold
+  threshold_value: null  # options: null | finite float; schema input, streaming overwrites from initial_threshold
+  pot_risk: 1.0e-3  # float in (0, 1); target false-positive rate for POT
 
 visualization:
-  mode: file        # window | file | none
-  every_n_frames: 10
-  overlay_alpha: 0.5
-  dashboard_enabled: true             # serve a live dashboard while main.py runs
-  dashboard_host: 127.0.0.1           # bind address; 0.0.0.0 to expose on LAN
-  dashboard_port: 8765                # http port for the dashboard
-  dashboard_max_live_points: 12000    # ring-buffer size for live embedding points
+  mode: file  # options: window | file | none
+  every_n_frames: 10  # int > 0; render cadence
+  overlay_alpha: 0.5  # float in [0, 1]; heatmap overlay opacity
+  dashboard_enabled: true  # options: true | false; serves live FastAPI/WebSocket dashboard
+  dashboard_host: 127.0.0.1  # non-empty host; use 0.0.0.0 to expose on LAN
+  dashboard_port: 8765  # int in 1..65535
+  dashboard_max_live_points: 12000  # int > 0; live embedding ring-buffer size
 
 offline:
-  experiment_name: Experiment 1_v1
+  experiment_name: Experiment 1_v1  # non-empty name prefix used only when run.mode: offline
   split:
-    val_ratio: 0.1
-    test_ratio: 0.2
-    stratify: true
-    train_on_good_only: true
-    val_balance: natural
-    min_train_goods: 50
+    val_ratio: 0.1  # float in [0, 1); val_ratio + test_ratio must be < 1
+    test_ratio: 0.2  # float in [0, 1); val_ratio + test_ratio must be < 1
+    stratify: true  # options: true | false
+    train_on_good_only: true  # options: true | false
+    val_balance: natural  # currently supported value: natural
+    min_train_goods: 50  # int >= 0
   threshold:
-    mode: val_f1
-    target_fpr: 0.01
+    mode: val_f1  # options: val_f1 | val_quantile
+    target_fpr: 0.01  # float in (0, 1); used by val_quantile

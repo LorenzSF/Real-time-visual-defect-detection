@@ -1,14 +1,31 @@
-# Evaluation of Unsupervised Defect Detection Models on Industrial Data Streams Under Corruption
+# Evaluation of Unsupervised Defect Detection Models on Industrial Data Streams
+
+Pipeline for streaming inference, visualization, standardized benchmarking, and
+corruption robustness analysis of unsupervised industrial anomaly detectors.
 
 ## Goals
 
-1. Streaming inference and visualization for industrial image streams.
-2. Benchmarking SOTA detectors against each other on the same stream:
-   each model listed under `model.name` is run in turn with the rest of
-   `config.yaml` held fixed, and the resulting `report.json` files
-   under `output_dir/<experiment_name>/` form the side-by-side
-   comparison.
-3. Measuring robustness under synthetic image corruptions.
+1. Run industrial image streams and produce anomaly scores, heatmaps, and traces.
+2. Benchmark detectors under the same dataset, split, threshold, seed, and output
+   schema.
+3. Measure robustness under synthetic corruptions.
+
+## Project Info
+
+Author: Lorenzo Fresca
+
+Contact: `lorenzostefano.fresca@student.kuleuven.be` or
+`frescalorenzo@gmail.com`
+
+This software was developed as part of a master's thesis in the Advanced Master
+of Artificial Intelligence in Business and Industry at KU Leuven.
+
+Thesis title: "Evaluation of unsupervised defect detection models on industrial
+data streams under corruption".
+
+Supervisor: Prof. M. Verbeke
+
+Daily supervisor: Matthias De Ryck
 
 ## Install
 
@@ -16,14 +33,13 @@
 pip install -r requirements.txt
 ```
 
-`anomalib` pulls the heavy model stack used by the pipeline. If you need a
-specific CUDA build, install the matching `torch` / `torchvision` pair first
-and then install `requirements.txt`.
+`anomalib` provides the heavy detector stack. For CUDA runs, install the matching
+`torch` and `torchvision` build before installing `requirements.txt`.
 
 ## Input Data
 
-Datasets are not shipped with this repository. The pipeline input is one flat
-folder configured through `stream.input_path`:
+`stream.input_path` must point to one flat image folder. Subfolders are rejected.
+Only files with suffixes listed in `stream.extensions` are streamed.
 
 ```text
 data/
@@ -31,19 +47,11 @@ data/
     image_0001.jpg
     image_0002.jpg
     image_0003.jpg
-    labels.json        # optional, only for benchmark metrics
+    labels.json        # optional for streaming metrics, required for offline
 ```
 
-Rules:
-
-- `stream.input_path` must point directly to the folder containing the images.
-- Subfolders are not accepted by the pipeline. If your dataset is nested,
-  flatten/copy the images you want to stream into the input folder first.
-- Images are discovered from that folder only. Only suffixes listed in
-  `stream.extensions` are streamed.
-- `image_id` is the filename without extension. These ids must be unique.
-- If `labels.json` exists, it must be an object mapping `image_id` to exactly
-  `"OK"` or `"NG"`:
+`image_id` is the filename without extension and must be unique. If present,
+`labels.json` must map every listed id to exactly `"OK"` or `"NG"`:
 
 ```json
 {
@@ -52,139 +60,155 @@ Rules:
 }
 ```
 
-Missing ids are treated as unknown labels. Precision, recall, F1, accuracy,
-AUROC, and AUPR in `report.json` only use frames with labels.
-
-For Real-IAD, first extract the dataset, then prepare a flat input folder from
-the images you want to stream. The original Real-IAD tree looks like:
-
-```text
-data/
-  Real-IAD_dataset/
-    realiad_1024/
-      <category>/
-        OK/
-          <specimen>/
-            *.jpg
-        NG/
-          <defect>/
-            <specimen>/
-              *.jpg
-```
+Streaming mode allows missing labels and excludes unknown labels from AUROC,
+AUPR, precision, recall, F1, and accuracy. Offline mode requires OK/NG labels for
+all images because it builds labelled train/validation/test splits.
 
 ## Config
 
+All runtime behavior is controlled by `config.yaml`; `main.py` is the only entry
+point.
+
 Main sections:
 
-- `seed`, `output_dir`, `log_every`
-- `run`: `mode` is `streaming` or `offline`
-- `stream`: dataset, input_path, extensions, shuffle, max_frames
+- `run.mode`: `streaming` or `offline`
+- `stream`: dataset name, flat input folder, extensions, shuffle, max_frames
 - `warmup`: warmup_steps, fit_epochs
-- `model`: name, backbone, device, checkpoint, image_size, batch_size
-- `corruption`: enabled, specs
-- `metrics`: window_size, threshold_mode, calibration_steps, initial_threshold, pot_risk
-- `visualization`: mode, every_n_frames, overlay_alpha, dashboard_enabled, dashboard_host, dashboard_port, dashboard_max_live_points
-- `offline`: train/val/test split and validation-threshold settings for offline runs
+- `model`: detector name, backbone, device, checkpoint, image_size, batch_size
+- `corruption`: enabled flag and ordered corruption specs
+- `metrics`: online window and streaming threshold calibration
+- `visualization`: file/window/none output and optional dashboard
+- `offline`: split ratios and validation-threshold settings
 
-Current implementation notes:
+Supported detectors:
 
-- `stream.dataset` is a free-form dataset name used in the output dir.
-- Warm-up uses the first `warmup.warmup_steps` images from the configured
-  sorted input order.
-- `warmup.fit_epochs` is the number of passes the gradient-trained detectors
-  (`draem`, `stfpm`, `csflow`, `rd4ad`) make over the warm-up buffer. Memory-based
-  detectors (`pca`, `patchcore`, `padim`, `subspacead`) fit in a single pass and
-  ignore the field.
-- Threshold calibration uses the first `metrics.calibration_steps` post-warmup
-  frames from that same sorted order. With `stream.shuffle: true`, only the
-  remaining post-calibration stream is shuffled.
-- `model.name` supports `pca`, `patchcore`, `padim`, `subspacead`, `stfpm`, `csflow`, `draem`, and `rd4ad`.
-- `model.image_size` and `model.batch_size` override detector defaults where the detector uses image tensors.
-- `visualization.mode: file` is the default path.
-- `visualization.dashboard_enabled: true` runs a FastAPI + WebSocket
-  server in a daemon thread alongside `main.py`. Open
-  `http://<dashboard_host>:<dashboard_port>/` to see the live dashboard
-  (six metric tiles, the current frame with heatmap overlay, and a
-  StandardScaler + PCA(2) projection of a per-frame vector combining
-  embedding, score, and anomaly-map statistics with the warm-up frames
-  as a reference cloud). Live points are colored by predicted label:
-  green for `0`, red for `1`. The dashboard runs orthogonally to
-  `visualization.mode` - any combination is valid. To use it from
-  Google Colab, expose the port with `pyngrok` or
-  `google.colab.output.serve_kernel_port_as_window`; from a remote
-  HPC node, use SSH local port forwarding
-  (`ssh -L 8765:localhost:8765 user@host`).
-- `metrics.threshold_mode` currently supports `max_score_ok` and `pot`.
-- `offline.threshold.mode` supports `val_f1` and `val_quantile`; Experiment 1 V1 uses `val_f1`.
-- Supported `corruption.specs[].kind` values are `gaussian_noise`,
-  `shot_noise`, and `motion_blur`.
-- Both threshold modes start with `metrics.initial_threshold`, score the first
-  `metrics.calibration_steps` post-warmup frames, then switch to the calibrated
-  threshold for subsequent frames. `max_score_ok` uses the maximum finite score
-  from the calibration window and assumes that window is OK-only by construction;
-  `pot` fits the unsupervised threshold from Siffer et al. 2017 (KDD, "Anomaly
-  Detection in Streams with Extreme Value Theory") using a Generalized Pareto
-  Distribution over the upper tail (above the 0.98 quantile). Neither mode
-  requires labels for threshold calibration.
-  The chosen threshold is reported in `report.json`; POT also reports
-  `threshold.{pot_u, pot_ksi, pot_sigma, pot_n_tail, ...}` for traceability.
-  Threshold-free evaluation (`auroc`, `aupr` in the report) is unaffected by
-  this choice; the threshold only determines the binary metrics
-  (`precision`, `recall`, `f1`, `accuracy`).
+- `pca`
+- `patchcore` / `anomalib_patchcore`
+- `padim` / `anomalib_padim`
+- `subspacead`
+- `stfpm` / `anomalib_stfpm`
+- `csflow` / `anomalib_csflow`
+- `draem` / `anomalib_draem`
+- `rd4ad` / `reverse_distillation`
 
-## Run
+`warmup.fit_epochs` is used by `draem`, `stfpm`, `csflow`, and `rd4ad`.
+Memory-based detectors (`pca`, `patchcore`, `padim`, `subspacead`) fit in one
+pass and ignore it.
+
+Supported streaming threshold modes:
+
+- `max_score_ok`: maximum finite score from the calibration window.
+- `pot`: Peaks-over-threshold calibration using a Generalized Pareto tail fit.
+
+Supported offline threshold modes:
+
+- `val_f1`: threshold with best validation F1.
+- `val_quantile`: OK-score validation quantile from `offline.threshold.target_fpr`.
+
+Supported corruptions are `gaussian_noise`, `shot_noise`, and `motion_blur`.
+Severity is `1`, `2`, or `3`. Multiple specs are sampled independently per frame
+and compose in config order. Offline mode requires `corruption.enabled: false`.
+
+## Streaming Flow
+
+Run:
 
 ```bash
 python main.py
 ```
 
-Reports are written under `output_dir/<experiment_name>/report.json`. The
-experiment name is derived per run from
-`{model.name}_{stream.dataset}_{input_folder}_{corruption_kind}_s{severity}_{YYYYMMDD-HHMMSS}`,
-omitting the corruption block when `corruption.enabled` is false.
+When `run.mode: streaming`, the pipeline:
 
-When `run.mode: offline`, `main.py` reads the same flat input folder and
-`labels.json`, builds a deterministic train/val/test split, fits on train,
-calibrates the threshold on val, and evaluates on test. Offline mode supports
-the experiment models only: PatchCore, PaDiM, SubspaceAD, STFPM, CSFlow, DRAEM,
-and RD4AD. It writes `report.json`, `frames.jsonl`, `validation_predictions.jsonl`,
-and `predictions.jsonl` in the run directory.
+1. Loads and validates `config.yaml`.
+2. Seeds Python, NumPy, and Torch when available.
+3. Builds the configured detector.
+4. Fits it on the first `warmup.warmup_steps` sorted images.
+5. Scores the next `metrics.calibration_steps` post-warmup frames to calibrate
+   the threshold.
+6. Applies configured corruptions lazily to the remaining stream.
+7. Runs prediction, metrics, visualization, and per-frame logging.
+8. Writes a self-contained `report.json`.
 
-Current per-run report fields include:
+Warm-up and threshold-calibration frames are logged but excluded from benchmark
+metrics. If `stream.shuffle: true`, only the post-calibration tail is shuffled;
+the warm-up and calibration prefixes stay sorted.
 
-- image-level quality: `auroc`, `aupr`, `precision`, `recall`, `f1`, `accuracy`
-- operational: `mean_latency_ms`, `p95_latency_ms`, `throughput_fps`
-- setup/runtime: `runtime.cold_start_s`, `runtime.peak_vram_mb`, `hardware`
-- threshold metadata: `threshold.mode`, `threshold.threshold`
-- evaluation metadata: calibration frames excluded from benchmark metrics
+## Offline Flow
 
-The same per-run directory also contains `frames.jsonl` - one JSON object
-per frame (`{idx, image_id, phase, score, pred_label, threshold_used,
-true_label, latency_ms}`) written line-buffered during the run. Warm-up and
-threshold-calibration frames are logged with `pred_label: -1` and are excluded
-from benchmark metrics. Evaluation frames start only after threshold calibration
-has completed. `pred_label` and `true_label` use `0` for OK, `1` for NG, and
-`-1` for unknown/unavailable.
-Load with `pandas.read_json(path, lines=True)`.
+When `run.mode: offline`, `main.py`:
 
-Rendered frames from `visualization.mode: file` are written into the same
-per-run directory as the report: `output_dir/<experiment_name>/`.
+1. Requires labels for all images.
+2. Builds a deterministic train/validation/test split from `offline.split`.
+3. Fits the detector on train frames.
+4. Calibrates the threshold on validation scores.
+5. Evaluates once on test frames.
+
+Offline mode supports the experiment detectors only: PatchCore, PaDiM,
+SubspaceAD, STFPM, CSFlow, DRAEM, and RD4AD.
+
+## Outputs
+
+Each run writes to:
+
+```text
+output_dir/<experiment_name>/
+```
+
+Streaming experiment names are derived from model, dataset, input folder,
+optional corruption specs, and timestamp. Offline names also include
+`offline.experiment_name`.
+
+Common outputs:
+
+- `report.json`: metrics, threshold metadata, runtime, hardware, model, stream,
+  warm-up, corruption, and evaluation metadata.
+- `frames.jsonl`: line-buffered per-frame trace with `idx`, `image_id`, `phase`,
+  `score`, `pred_label`, `threshold_used`, `true_label`, and `latency_ms`.
+- `frame_*.png`: rendered anomaly frames when `visualization.mode: file`.
+
+Offline mode also writes:
+
+- `validation_predictions.jsonl`
+- `predictions.jsonl`
+
+Label convention is `0` for OK, `1` for NG, and `-1` for unknown or unavailable.
+Load JSONL files with `pandas.read_json(path, lines=True)`.
+
+## Visualization
+
+`visualization.mode` controls frame rendering:
+
+- `file`: save rendered anomalous frames in the run directory.
+- `window`: show an OpenCV window.
+- `none`: disable frame rendering.
+
+If `visualization.dashboard_enabled: true`, a FastAPI/WebSocket dashboard runs
+beside the pipeline at `http://<dashboard_host>:<dashboard_port>/`. The
+dashboard shows live metrics, current frame overlay, and a StandardScaler +
+PCA(2) projection when detector vectors are available.
 
 ## Active Modules
 
-- [src/schemas.py](src/schemas.py) - dataclasses and strict config loading
-- [src/stream.py](src/stream.py) - input stream construction
-- [src/models.py](src/models.py) - model construction and warm-up
-- [src/corruption.py](src/corruption.py) - per-frame corruptions
-- [src/metrics.py](src/metrics.py) - online metrics and final benchmark report
-- [src/visualization.py](src/visualization.py) - streaming outputs and dashboard
+- [main.py](main.py): orchestration, threshold logic, reporting
+- [src/schemas.py](src/schemas.py): dataclasses and strict config loading
+- [src/stream.py](src/stream.py): image discovery, loading, warm-up, splits
+- [src/models.py](src/models.py): detector construction and prediction contract
+- [src/corruption.py](src/corruption.py): lazy per-frame corruptions
+- [src/metrics.py](src/metrics.py): online/offline metrics and JSONL logging
+- [src/visualization.py](src/visualization.py): rendered frames and dashboard
 
 ## Extending
 
-To add a model, extend the dispatch in [src/models.py](src/models.py).
+Add a model in `src/models.py` and register it in `build_model`.
 
-To add a corruption, register a new kernel in [src/corruption.py](src/corruption.py).
+Add a corruption kernel in `src/corruption.py` and register it in
+`_CORRUPTIONS`.
+
+Any user-facing config change must update `config.yaml`, `src/schemas.py`, and
+this README.
 
 ## License
 
 Apache-2.0. See `LICENSE`.
+
+Copyright 2026 KU Leuven and Lorenzo Stefano Fresca.
