@@ -41,6 +41,7 @@ notebooks and aux scripts/
 notebooks and aux scripts/*
 !notebooks and aux scripts/analyze_Experiment*.ipynb
 !notebooks and aux scripts/hardware_equivalence.py
+!notebooks and aux scripts/generate_accuracy_matrix.py
 #notebooks/analyze job*
 #notebooks/benchmark*
 #notebooks/compare*
